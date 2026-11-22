@@ -32,10 +32,14 @@ export const JOINTS = [
   'kneeL',
   'ankleL',
   'footL',
+  'toeL',
+  'heelL',
   'hipR',
   'kneeR',
   'ankleR',
   'footR',
+  'toeR',
+  'heelR',
 ] as const;
 
 export type JointName = (typeof JOINTS)[number];
@@ -57,10 +61,14 @@ export const JOINT_PARENT: Record<JointName, JointName | null> = {
   kneeL: 'hipL',
   ankleL: 'kneeL',
   footL: 'ankleL',
+  toeL: 'footL',
+  heelL: 'ankleL',
   hipR: 'pelvis',
   kneeR: 'hipR',
   ankleR: 'kneeR',
   footR: 'ankleR',
+  toeR: 'footR',
+  heelR: 'ankleR',
 };
 
 /**
@@ -85,17 +93,24 @@ export const BONE_OFFSET: Record<JointName, Vec3> = {
   elbowR: [-0.28, 0, 0],
   handR: [-0.25, 0, 0],
 
-  // 左腿：髋向侧，膝向下，踝向下，脚向前
+  // 左腿：髋向侧，膝向下，踝向下。
+  // 脚拆成三段：踝→跖趾（脚掌前段）、跖趾→脚尖、踝→脚跟。
+  // 只有一段的话蹲下时脚掌就是一块斜板，看不出「脚掌贴地、脚尖吃住地面」。
+  // 脚底高度：踝 0.06 - 0.055 ≈ 0.005，正好落在地面上。
   hipL: [0.1, -0.06, 0],
   kneeL: [0, -0.44, 0],
-  ankleL: [0, -0.42, 0],
-  footL: [0, -0.06, 0.16],
+  ankleL: [0, -0.39, 0],
+  footL: [0, -0.055, 0.105],
+  toeL: [0, -0.005, 0.085],
+  heelL: [0, -0.055, -0.062],
 
   // 右腿
   hipR: [-0.1, -0.06, 0],
   kneeR: [0, -0.44, 0],
-  ankleR: [0, -0.42, 0],
-  footR: [0, -0.06, 0.16],
+  ankleR: [0, -0.39, 0],
+  footR: [0, -0.055, 0.105],
+  toeR: [0, -0.005, 0.085],
+  heelR: [0, -0.055, -0.062],
 };
 
 /** 左右镜像的关节对，生成对称姿态时用。 */
@@ -107,6 +122,8 @@ export const MIRROR_PAIRS: readonly (readonly [JointName, JointName])[] = [
   ['kneeL', 'kneeR'],
   ['ankleL', 'ankleR'],
   ['footL', 'footR'],
+  ['toeL', 'toeR'],
+  ['heelL', 'heelR'],
 ];
 
 /** 绘制火柴人时连线的骨段（父 → 子）。 */

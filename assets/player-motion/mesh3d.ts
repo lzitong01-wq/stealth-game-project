@@ -91,8 +91,13 @@ const PARTS: readonly PartDef[] = [
   { from: 'kneeL', to: 'ankleL', w: 0.125, h: 0.125, mat: 'limb' },
   { from: 'hipR', to: 'kneeR', w: 0.145, h: 0.145, mat: 'limb' },
   { from: 'kneeR', to: 'ankleR', w: 0.125, h: 0.125, mat: 'limb' },
-  { from: 'ankleL', to: 'footL', w: 0.12, h: 0.075, mat: 'foot' },
-  { from: 'ankleR', to: 'footR', w: 0.12, h: 0.075, mat: 'foot' },
+  // 脚拆三段：脚掌 / 脚趾 / 脚跟
+  { from: 'ankleL', to: 'footL', w: 0.1, h: 0.072, mat: 'foot' },
+  { from: 'footL', to: 'toeL', w: 0.095, h: 0.048, mat: 'foot' },
+  { from: 'ankleL', to: 'heelL', w: 0.088, h: 0.062, mat: 'foot' },
+  { from: 'ankleR', to: 'footR', w: 0.1, h: 0.072, mat: 'foot' },
+  { from: 'footR', to: 'toeR', w: 0.095, h: 0.048, mat: 'foot' },
+  { from: 'ankleR', to: 'heelR', w: 0.088, h: 0.062, mat: 'foot' },
 ];
 
 const HEAD_RADIUS = 0.125;

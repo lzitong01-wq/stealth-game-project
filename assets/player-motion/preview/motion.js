@@ -66,8 +66,13 @@ export const MOTION_CONFIG = {
      * 松手（无输入）时保持贴墙，不会自己弹开。
      */
     coverHoldDot: 0.55,
-    /** 蹲下时骨盆下降量（米）。 */
-    crouchDrop: 0.38,
+    /**
+     * 蹲下时骨盆下降量（米）。
+     * 与 poseGait 里的腿角（髋 -60 / 膝 +100）配套：这组角度让髋到踝的
+     * 垂直距离缩短约 0.35m，root 同步下降同样的量，脚踝才能留在原高度、脚掌贴地。
+     * 改角度就要重算这个值，否则蹲下会穿地或悬空。
+     */
+    crouchDrop: 0.35,
 };
 export function createMotion(spawn = [0, 0, 0]) {
     const p = restPose();
@@ -129,7 +134,10 @@ function poseArm(p, side, down, swing, bend, tuck = 0) {
     const sh = side < 0 ? 'shoulderL' : 'shoulderR';
     const el = side < 0 ? 'elbowL' : 'elbowR';
     p[sh] = [swing, 0, side * down];
-    p[el] = [-bend, 0, side * tuck];
+    // 肘弯曲必须用 Y 旋转：前臂骨段同样沿 ±X，绕 X 只会自转（这里踩过第二次坑，
+    // 之前 bend 全写在 X 上，等于所有姿态的肘都是直的）。
+    // 绕 Y 把 ±X 转到 ±Z，正是「前臂向前折」；tuck 继续用 Z 做外展。
+    p[el] = [0, side * bend, side * tuck];
 }
 /** 站立待机：手臂自然下垂，极轻微呼吸。 */
 function poseIdle(t) {
@@ -158,27 +166,41 @@ function poseGait(phase, amp, kneeAmp, lean, crouch) {
     // 支撑腿膝盖抬起时弯曲，摆动腿更弯
     const kneeL = Math.max(0, -Math.sin(a)) * kneeAmp;
     const kneeR = Math.max(0, -Math.sin(a + Math.PI)) * kneeAmp;
-    // 腿：摆动 + 蹲下屈曲（髋前屈 62°、膝后折 108°、踝背屈）
-    p.hipL = [swingL + crouch * 62, 0, 0];
-    p.hipR = [swingR + crouch * 62, 0, 0];
-    p.kneeL = [-kneeL - crouch * 108, 0, 0];
-    p.kneeR = [-kneeR - crouch * 108, 0, 0];
-    p.ankleL = [kneeL * 0.35 + crouch * 46, 0, 0];
-    p.ankleR = [kneeR * 0.35 + crouch * 46, 0, 0];
+    // 腿：步态摆动 + 蹲下屈曲。
+    //
+    // 蹲伏的几何要点（之前写错，膝盖被甩到身体后方，那是「跪」不是「蹲」）：
+    //   hip  取负值 → 大腿向前上方抬，膝盖朝前
+    //   knee 取正值 → 小腿相对大腿向后折（生理上膝盖只能往这个方向弯）
+    //   ankle 取负值 → 踝背屈，把脚掌压回水平贴地
+    // 这组数值（-60 / +100 / -40）配合 crouchDrop 0.31，髋到踝的垂直距离
+    // 正好把脚踝留在站立时的高度，脚掌贴地不穿模。
+    // 蹲下时双腿向外微开：支撑面更宽，也更像潜行的低伏姿态
+    p.hipL = [swingL - crouch * 60, 0, -crouch * 7];
+    p.hipR = [swingR - crouch * 60, 0, crouch * 7];
+    // 步态的膝盖也要用正值：摆动腿抬脚跟时小腿是向后折的
+    p.kneeL = [kneeL + crouch * 100, 0, 0];
+    p.kneeR = [kneeR + crouch * 100, 0, 0];
+    // 踝：摆动腿背屈避免拖地（跟随膝弯），蹲下时再背屈一次把脚掌压平
+    // 蹲下时的背屈量取「骨盆后倾 + 髋 + 膝」的相反数，让脚掌净旋转归零、真正贴平
+    p.ankleL = [-kneeL * 0.3 - crouch * 28, 0, 0];
+    p.ankleR = [-kneeR * 0.3 - crouch * 28, 0, 0];
     // 手臂反向摆动：左腿前摆时右臂前摆（对侧摆臂）
     // 摆幅比腿小，符合真实步态；蹲下时手臂前收、肘弯明显加大，避免"蹲着的 T-pose"
     const armSwingL = -swingL * 0.85;
     const armSwingR = -swingR * 0.85;
-    const armDown = 74 - crouch * 10;
-    const armBend = 14 + crouch * 50;
-    const armCrouchSwing = -crouch * 18;
+    // 蹲伏时手臂前伸扶膝：上臂抬离身体、肘弯加大、整体向前
+    const armDown = 74 - crouch * 22;
+    const armBend = 14 + crouch * 62;
+    const armCrouchSwing = -crouch * 32;
     poseArm(p, -1, armDown, armSwingL + armCrouchSwing, armBend, 7);
     poseArm(p, 1, armDown, armSwingR + armCrouchSwing, armBend, 7);
-    // 躯干：跑步前倾 + 步态带来的轻微上下起伏（用脊柱俯仰近似）
-    p.spine = [lean * 0.45 + crouch * 10, 0, 0];
-    p.chest = [lean * 0.35 + crouch * 8, 0, Math.sin(a) * 2.5];
-    p.neck = [-lean * 0.5, 0, 0];
-    p.head = [-lean * 0.35, 0, 0];
+    // 躯干：跑步前倾 + 蹲伏时明显压低上身。
+    // 蹲伏不是单纯把腿弯起来——上身要前倾压低，颈部反向抬起保持视线，
+    // 这样才像潜行，而不是「蹲着的 T-pose」。
+    p.spine = [lean * 0.45 + crouch * 25, 0, 0];
+    p.chest = [lean * 0.35 + crouch * 14, 0, Math.sin(a) * 2.5];
+    p.neck = [-lean * 0.5 - crouch * 22, 0, 0];
+    p.head = [-lean * 0.35 - crouch * 12, 0, 0];
     // 蹲下时重心后移一点，别显得要往前栽
     if (crouch > 0.001) {
         p.pelvis = [-crouch * 12, 0, 0];
@@ -204,7 +226,8 @@ function poseCover(side, t) {
     // 内侧（靠墙那侧）手臂上举扶墙：down 取负值 = 抬到平举以上
     poseArm(p, (side * -1), -42, -6, 22, 24);
     // 外侧手臂收紧在身前，肘弯得多一些，像个"缩起来"的躲藏姿势
-    poseArm(p, side, 58, -34, 82, 42);
+    // 外侧手臂收得更贴身：垂得更多、前伸更少、肘弯更大，避免看成「平举」
+    poseArm(p, side, 70, -16, 98, 30);
     // 双腿微屈，内侧腿承担重心
     p.hipL = [10, 0, 0];
     p.hipR = [14, 0, 0];
@@ -438,7 +461,9 @@ export function stepMotion(rt, input, dt) {
         target = poseCover(rt.coverSide, rt.stateTime);
     }
     else if (rt.state === 'crouch') {
-        target = poseGait(rt.gaitPhase, 14, 26, 6, rt.crouchAmount);
+        // 静止蹲着不该还在小幅摆腿：摆幅按实际速度缩放，停住就完全定住
+        const k = Math.min(1, Math.max(0, rt.speed / cfg.crouchSpeed));
+        target = poseGait(rt.gaitPhase, 14 * k, 26 * k, 6, rt.crouchAmount);
     }
     else if (rt.state === 'run') {
         target = poseGait(rt.gaitPhase, 46, 74, 14, rt.crouchAmount);

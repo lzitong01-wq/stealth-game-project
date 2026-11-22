@@ -63,7 +63,7 @@ const LIGHT = norm([0.55, 0.78, 0.32]);
  * ------------------------------------------------------------------ */
 
 /** 等距相机参数：偏航 + 俯角（负值 = 从上往下看）。 */
-const CAM = { yaw: -0.68, pitch: -0.74 };
+const CAM = { yaw: -0.72, pitch: -0.60 };
 
 interface Cam {
   /** 相机对准的世界点。 */
@@ -199,9 +199,14 @@ const PARTS: readonly PartDef[] = [
   { from: 'kneeL', to: 'ankleL', w: 0.125, h: 0.125, color: LIMB },
   { from: 'hipR', to: 'kneeR', w: 0.145, h: 0.145, color: LIMB },
   { from: 'kneeR', to: 'ankleR', w: 0.125, h: 0.125, color: LIMB },
-  // 脚：用一个略扁的盒，从踝向前
-  { from: 'ankleL', to: 'footL', w: 0.12, h: 0.075, color: FOOT },
-  { from: 'ankleR', to: 'footR', w: 0.12, h: 0.075, color: FOOT },
+  // 脚拆三段：脚掌（踝→跖趾）、脚趾（跖趾→尖）、脚跟（踝→跟）。
+  // 单段的话蹲下时脚就是一块斜板，看不出脚掌贴地。
+  { from: 'ankleL', to: 'footL', w: 0.1, h: 0.072, color: FOOT },
+  { from: 'footL', to: 'toeL', w: 0.095, h: 0.048, color: FOOT },
+  { from: 'ankleL', to: 'heelL', w: 0.088, h: 0.062, color: FOOT },
+  { from: 'ankleR', to: 'footR', w: 0.1, h: 0.072, color: FOOT },
+  { from: 'footR', to: 'toeR', w: 0.095, h: 0.048, color: FOOT },
+  { from: 'ankleR', to: 'heelR', w: 0.088, h: 0.062, color: FOOT },
 ];
 
 /** 头部：用球体表达（投影后是圆），比盒子更像人。 */
@@ -255,30 +260,24 @@ function pushScene(out: Quad[], cam: Cam, walls: readonly { a: Vec3; b: Vec3 }[]
     const cx = w.a[0];
     const innerX = cx > 0 ? cx - WALL_THICK : cx + WALL_THICK;
 
-    // 近侧墙只画墙顶轮廓，不画立面：等同于 2.5D 游戏里「切掉前景遮挡」，
-    // 否则再半透明也会把角色的腿染成暗红，读不清迈步。
+    // 近侧墙完全不画：连墙顶轮廓都会投影成一条斜带横穿角色下半身，
+    // 怎么调透明度都影响读动作。等同于 2.5D 游戏里「切掉前景遮挡」。
     if (!isFar) {
-      pushRect(
-        out,
-        [innerX, WALL_HEIGHT, z0],
-        [innerX, WALL_HEIGHT, z1],
-        [cx, WALL_HEIGHT, z1],
-        [cx, WALL_HEIGHT, z0],
-        WALL_TOP,
-        cam,
-        0.75,
-        WALL_EDGE,
-      );
-      pushRect(
-        out,
-        [innerX, WALL_HEIGHT, z0],
-        [innerX, WALL_HEIGHT, z1],
-        [innerX, WALL_HEIGHT - 0.05, z1],
-        [innerX, WALL_HEIGHT - 0.05, z0],
-        [230, 150, 140],
-        cam,
-        0.75,
-      );
+      // 只在地面留一条虚线标记这面墙的位置，不画立体部分
+      const step = 0.55;
+      for (let z = z0; z < z1 - 1e-6; z += step * 2) {
+        const zz = Math.min(z + step, z1);
+        pushRect(
+          out,
+          [innerX, 0.004, z],
+          [innerX, 0.004, zz],
+          [innerX + 0.05, 0.004, zz],
+          [innerX + 0.05, 0.004, z],
+          [200, 90, 90],
+          cam,
+          0.55,
+        );
+      }
       return;
     }
 
@@ -418,7 +417,9 @@ export function createMotionView3D(parent: HTMLElement, width = 760, height = 54
     ctx.fillRect(0, 0, width, height);
 
     // 相机跟随角色（保持人在画面中心，地面网格随之滚动）
-    cam.target = [rt.rootPos[0], 0.82, rt.rootPos[2]];
+    // 蹲下时视线随之降低（半量跟随）：全跟会让画面上下跳，不跟则人跑到画面底部
+    const crouchLift = MOTION_CONFIG.crouchDrop * rt.crouchAmount * 0.55;
+    cam.target = [rt.rootPos[0], 0.82 - crouchLift, rt.rootPos[2]];
 
     drawGrid(ctx, cam, rt.rootPos);
     drawShadow(ctx, cam, rt.rootPos, 0.3);

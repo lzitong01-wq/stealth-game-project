@@ -262,6 +262,78 @@ describe('手臂姿态', () => {
     expect(dx, '蹲下时手不应向外张开').toBeLessThan(0.45);
     expect(dy, '蹲下时手不应与肩齐平').toBeGreaterThan(0.2);
   });
+
+  /**
+   * 回归：肘弯曲曾写在 X 旋转上，而前臂骨段沿 ±X —— 绕 X 只自转，等于肘永远是直的。
+   */
+  it('肘弯曲真的生效：前臂向前折，手落在肩的前方', () => {
+    const rt = advance(createMotion([0, 0, 0]), 1.2, { crouch: true });
+    const drop = -MOTION_CONFIG.crouchDrop * rt.crouchAmount;
+    const s = solvePose(rt.pose, [0, drop, 0], [0, 0, 0]);
+    const dz = s.positions.handL[2] - s.positions.shoulderL[2];
+    expect(dz, '手应伸到肩前方').toBeGreaterThan(0.12);
+  });
+});
+
+/**
+ * 蹲伏几何回归。
+ * 曾经的错误：hip 用 +62°（大腿向后转），膝盖被甩到身体后方 —— 那是「跪」不是「蹲」；
+ * knee 也用负值（向前折），违反生理方向；脚只有一段，蹲下时就是一块斜板。
+ */
+describe('蹲伏几何', () => {
+  /** 取蹲下到位后的关节世界坐标（与视图层一样把 root 整体压低）。 */
+  function crouchSolved() {
+    const rt = advance(createMotion([0, 0, 0]), 1.2, { crouch: true });
+    expect(rt.state).toBe('crouch');
+    expect(rt.crouchAmount).toBeGreaterThan(0.98);
+    const drop = -MOTION_CONFIG.crouchDrop * rt.crouchAmount;
+    return solvePose(rt.pose, [0, drop, 0], [0, 0, 0]);
+  }
+
+  it('蹲下时膝盖在髋的前方，不是后方', () => {
+    const s = crouchSolved();
+    const hip = s.positions.hipL;
+    const knee = s.positions.kneeL;
+    // 角色朝 +Z：膝盖应比髋明显更靠前
+    expect(knee[2] - hip[2], '膝盖应向前伸').toBeGreaterThan(0.2);
+  });
+
+  it('蹲下时膝盖比髋低（是蹲下，不是把腿抬起来）', () => {
+    const s = crouchSolved();
+    expect(s.positions.hipL[1] - s.positions.kneeL[1], '膝应低于髋').toBeGreaterThan(0.1);
+  });
+
+  it('蹲下后脚踝仍停在站立时的高度：脚掌贴地，不穿地也不悬空', () => {
+    const stand = solvePose(restPose(), [0, 0, 0], [0, 0, 0]);
+    const s = crouchSolved();
+    const dy = Math.abs(s.positions.ankleL[1] - stand.positions.ankleL[1]);
+    expect(dy, '踝高漂移').toBeLessThan(0.05);
+    // 脚底不应明显穿到地面以下
+    expect(s.positions.toeL[1]).toBeGreaterThan(-0.04);
+    expect(s.positions.heelL[1]).toBeGreaterThan(-0.04);
+  });
+
+  it('蹲下时脚掌接近水平（脚尖与脚跟几乎等高）', () => {
+    const s = crouchSolved();
+    const diff = Math.abs(s.positions.toeL[1] - s.positions.heelL[1]);
+    expect(diff, '脚掌应被踝背屈压平').toBeLessThan(0.05);
+  });
+
+  it('蹲下时上身压低前倾，但颈部反向抬起保持视线', () => {
+    const rt = advance(createMotion([0, 0, 0]), 1.2, { crouch: true });
+    // 脊柱前倾（正角度），颈部反向（负角度）
+    expect(rt.pose.spine[0], '脊柱应前倾').toBeGreaterThan(12);
+    expect(rt.pose.neck[0], '颈部应反向抬起').toBeLessThan(-10);
+  });
+
+  it('三步脚段存在：跖趾 / 脚尖 / 脚跟都有独立世界坐标', () => {
+    const s = crouchSolved();
+    const foot = s.positions.footL;
+    const toe = s.positions.toeL;
+    const heel = s.positions.heelL;
+    expect(Math.hypot(toe[0] - foot[0], toe[1] - foot[1], toe[2] - foot[2])).toBeGreaterThan(0.05);
+    expect(Math.hypot(heel[0] - foot[0], heel[1] - foot[1], heel[2] - foot[2])).toBeGreaterThan(0.1);
+  });
 });
 
 /**
