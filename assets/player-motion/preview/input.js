@@ -8,10 +8,15 @@
  */
 /**
  * 演示用掩体：两条沿 Z 轴延伸的平行墙，位于 x = ±halfWidth。
- * 角色在两墙之间移动，靠近任一侧即视为可贴墙。
+ *
+ * 尺寸是算过的，不是随手取的：
+ *   - 贴墙位置 = halfWidth - bodyRadius = 1.0 - 0.25 = 0.75m
+ *   - 距墙 = 0.25m，落在「可贴墙」阈值 0.45m 内
+ *   - 翻滚位移 1.5m = 2 × 0.75，正好从一侧贴墙滚到另一侧贴墙，
+ *     这样「在两个墙壁之间用翻滚转换躲藏位置」才真的成立。
  */
-export function createCorridorProbe(halfWidth = 1.6, trigger = 1.15) {
-    const inside = (halfWidth) => (px) => Math.min(halfWidth, Math.max(-halfWidth, px));
+export function createCorridorProbe(halfWidth = 1.0, trigger = 1.15, bodyRadius = 0.25) {
+    const clampAxis = (px) => Math.min(halfWidth - bodyRadius, Math.max(-(halfWidth - bodyRadius), px));
     return {
         query(position, facingDeg) {
             const px = position[0];
@@ -26,16 +31,27 @@ export function createCorridorProbe(halfWidth = 1.6, trigger = 1.15) {
             const toWallX = useLeft ? -1 : 1;
             const dotRight = rightX * toWallX + rightZ * 0;
             const side = dotRight > 0 ? 1 : -1;
+            // 法线由墙指向角色：靠左墙（-X）时是 +X，靠右墙（+X）时是 -X
+            const normal = useLeft ? [1, 0, 0] : [-1, 0, 0];
             return {
                 available: distance <= trigger,
                 side,
                 distance,
+                normal,
             };
         },
-        clamp(position, bodyRadius = 0.3) {
-            const limit = Math.max(0, halfWidth - bodyRadius);
-            const px = inside(limit)(position[0]);
+        clamp(position, radius = bodyRadius) {
+            const limit = Math.max(0, halfWidth - radius);
+            const px = Math.min(limit, Math.max(-limit, position[0]));
             return px === position[0] ? position : [px, position[1], position[2]];
+        },
+        walls(position, span = 6) {
+            const z0 = position[2] - span;
+            const z1 = position[2] + span;
+            return [-halfWidth, halfWidth].map((wallX) => ({
+                a: [wallX, 0, z0],
+                b: [wallX, 0, z1],
+            }));
         },
     };
 }
@@ -104,5 +120,6 @@ export function toMotionInput(raw, probeResult) {
         coverAvailable: probeResult.available,
         coverSide: probeResult.side,
         coverDistance: probeResult.distance,
+        coverNormal: probeResult.normal,
     };
 }

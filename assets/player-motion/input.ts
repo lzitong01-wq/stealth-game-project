@@ -15,17 +15,35 @@ export interface CoverProbe {
     available: boolean;
     side: -1 | 1;
     distance: number;
+    /**
+     * 墙的表面法线（单位向量，**由墙指向角色**）。
+     * 有了它才能正确回答两个问题：
+     *   1. 玩家是不是在往墙里推（dot(输入, -normal) > 0）
+     *   2. 侧身贴墙时该朝哪个方向站（沿墙方向 = normal × up）
+     * 只靠「左/右」side 在正对墙时会退化，判断不出方向。
+     */
+    normal: Vec3;
   };
   /** 把角色限制在走廊内，模拟墙体阻挡。返回修正后的位置。 */
   clamp(position: Vec3, bodyRadius?: number): Vec3;
+  /**
+   * 两面墙的世界坐标线段（沿 Z 延伸），供俯视图按真实投影绘制。
+   * 用一个以角色为中心、前后各 span 米的窗口，避免无限长的墙。
+   */
+  walls(position: Vec3, span?: number): { a: Vec3; b: Vec3 }[];
 }
 
 /**
  * 演示用掩体：两条沿 Z 轴延伸的平行墙，位于 x = ±halfWidth。
- * 角色在两墙之间移动，靠近任一侧即视为可贴墙。
+ *
+ * 尺寸是算过的，不是随手取的：
+ *   - 贴墙位置 = halfWidth - bodyRadius = 1.0 - 0.25 = 0.75m
+ *   - 距墙 = 0.25m，落在「可贴墙」阈值 0.45m 内
+ *   - 翻滚位移 1.5m = 2 × 0.75，正好从一侧贴墙滚到另一侧贴墙，
+ *     这样「在两个墙壁之间用翻滚转换躲藏位置」才真的成立。
  */
-export function createCorridorProbe(halfWidth = 1.6, trigger = 1.15): CoverProbe {
-  const inside = (halfWidth: number) => (px: number) => Math.min(halfWidth, Math.max(-halfWidth, px));
+export function createCorridorProbe(halfWidth = 1.0, trigger = 1.15, bodyRadius = 0.25): CoverProbe {
+  const clampAxis = (px: number) => Math.min(halfWidth - bodyRadius, Math.max(-(halfWidth - bodyRadius), px));
 
   return {
     query(position, facingDeg) {
@@ -43,16 +61,28 @@ export function createCorridorProbe(halfWidth = 1.6, trigger = 1.15): CoverProbe
       const dotRight = rightX * toWallX + rightZ * 0;
       const side: -1 | 1 = dotRight > 0 ? 1 : -1;
 
+      // 法线由墙指向角色：靠左墙（-X）时是 +X，靠右墙（+X）时是 -X
+      const normal: Vec3 = useLeft ? [1, 0, 0] : [-1, 0, 0];
+
       return {
         available: distance <= trigger,
         side,
         distance,
+        normal,
       };
     },
-    clamp(position, bodyRadius = 0.3) {
-      const limit = Math.max(0, halfWidth - bodyRadius);
-      const px = inside(limit)(position[0]);
+    clamp(position, radius = bodyRadius) {
+      const limit = Math.max(0, halfWidth - radius);
+      const px = Math.min(limit, Math.max(-limit, position[0]));
       return px === position[0] ? position : [px, position[1], position[2]];
+    },
+    walls(position, span = 6) {
+      const z0 = position[2] - span;
+      const z1 = position[2] + span;
+      return [-halfWidth, halfWidth].map((wallX) => ({
+        a: [wallX, 0, z0] as Vec3,
+        b: [wallX, 0, z1] as Vec3,
+      }));
     },
   };
 }
@@ -134,7 +164,7 @@ export function createKeyboardInput(target: Window | HTMLElement = window): {
 /** 把原始按键翻译成 MotionInput。相机固定朝 +Z，所以输入即世界方向。 */
 export function toMotionInput(
   raw: RawInput,
-  probeResult: { available: boolean; side: -1 | 1; distance: number },
+  probeResult: { available: boolean; side: -1 | 1; distance: number; normal: Vec3 },
 ) {
   return {
     moveX: (raw.right ? 1 : 0) - (raw.left ? 1 : 0),
@@ -145,5 +175,6 @@ export function toMotionInput(
     coverAvailable: probeResult.available,
     coverSide: probeResult.side,
     coverDistance: probeResult.distance,
+    coverNormal: probeResult.normal,
   };
 }

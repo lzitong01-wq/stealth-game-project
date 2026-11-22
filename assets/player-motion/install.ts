@@ -29,7 +29,11 @@ export interface InstallMotionOptions {
   mount?: string;
   /** 出生点，默认原点。 */
   spawn?: readonly [number, number, number];
-  /** 走廊半宽（演示掩体用），默认 1.6m。 */
+  /**
+   * 走廊半宽（演示掩体用），默认 1.0m。
+   * 与 MOTION_CONFIG.rollDistance 是配套的：1.0 - 身体半径 0.25 = 0.75，
+   * 翻滚 1.5m 正好从一侧贴墙到另一侧，改一个就要同步改另一个。
+   */
   corridorHalfWidth?: number;
 }
 
@@ -51,7 +55,7 @@ export function installMotionDemo(ctx: MotionHostContext, options: InstallMotion
   }
 
   const keyboard = createKeyboardInput(window);
-  const probe = createCorridorProbe(options.corridorHalfWidth ?? 1.6);
+  const probe = createCorridorProbe(options.corridorHalfWidth ?? 1.0);
   const spawn = options.spawn ?? [0, 0, 0];
   const runtime = createMotion([spawn[0], spawn[1], spawn[2]]);
 
@@ -78,8 +82,11 @@ export function installMotionDemo(ctx: MotionHostContext, options: InstallMotion
         const input = toMotionInput(keyboard.read(), cover);
         stepMotion(runtime, input, dt);
         const clamped = probe.clamp(runtime.rootPos);
-        if (clamped !== runtime.rootPos) runtime.rootPos = clamped;
-        view?.render(runtime, cover);
+        if (clamped !== runtime.rootPos) {
+          runtime.rootPos = clamped;
+          runtime.speed *= 0.3; // 撞墙：速度被墙体吃掉，避免 HUD 显示假速度
+        }
+        view?.render(runtime, { ...cover, walls: probe.walls(runtime.rootPos) });
       },
     })
     .unwrap();

@@ -10,9 +10,9 @@
  *   ?script=1   自动演示（默认开）
  *   ?freeze=14  推进到第 14 秒后冻结，便于截图固定姿态
  */
-import { createMotion, stepMotion } from '../motion.js';
-import { createMotionView } from '../view.js';
-import { createCorridorProbe, createKeyboardInput, toMotionInput } from '../input.js';
+import { createMotion, stepMotion } from './motion.js';
+import { createMotionView } from './view.js';
+import { createCorridorProbe, createKeyboardInput, toMotionInput } from './input.js';
 const params = new URLSearchParams(location.search);
 /** ?at=12 → 用固定步长快进到第 12 秒并冻结，适合截图取证。 */
 const atSecond = params.has('at') ? Number(params.get('at')) : null;
@@ -72,14 +72,20 @@ function composeInput(intent) {
         coverAvailable: cover.available,
         coverSide: cover.side,
         coverDistance: cover.distance,
+        coverNormal: cover.normal,
     };
 }
-/** 推进一帧并限制在走廊内（模拟墙体阻挡）。 */
+/**
+ * 推进一帧并限制在走廊内（模拟墙体阻挡）。
+ * 位置被钳制时同时压掉速度——否则会「顶着墙还在加速」，HUD 上的速度是假的。
+ */
 function tick(intent, dt) {
     stepMotion(runtime, composeInput(intent), dt);
     const clamped = probe.clamp(runtime.rootPos);
-    if (clamped !== runtime.rootPos)
+    if (clamped !== runtime.rootPos) {
         runtime.rootPos = clamped;
+        runtime.speed *= 0.3;
+    }
 }
 let scriptTime = 0;
 let lastMs = performance.now();
@@ -110,12 +116,14 @@ function frame() {
             const cover = probe.query(runtime.rootPos, runtime.facing);
             stepMotion(runtime, toMotionInput(keyboard.read(), cover), dt);
             const clamped = probe.clamp(runtime.rootPos);
-            if (clamped !== runtime.rootPos)
+            if (clamped !== runtime.rootPos) {
                 runtime.rootPos = clamped;
+                runtime.speed *= 0.3;
+            }
         }
     }
     const cover = probe.query(runtime.rootPos, runtime.facing);
-    view.render(runtime, cover);
+    view.render(runtime, { ...cover, walls: probe.walls(runtime.rootPos) });
     requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);

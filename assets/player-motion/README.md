@@ -12,15 +12,29 @@
 
 | 动作 | 触发 | 关键细节 |
 |---|---|---|
-| 待机 | 无输入 | 呼吸起伏，手臂自然下垂 |
+| 待机 | 无输入 | 呼吸起伏，手臂自然垂在体侧 |
 | 步行 | WASD | 1.7 m/s，步频 0.95 Hz，手臂反向摆动 |
 | 疾走 | WASD + Shift | 4.3 m/s，步频 1.55 Hz，摆幅加大、躯干前倾 |
-| 下蹲 | 按住 Ctrl | 骨盆下降 0.38 m，髋弯 62°、膝弯 108°，蹲行 0.85 m/s |
-| 贴墙躲藏 | 靠近可躲藏墙（≤0.45 m） | 侧身、内侧手臂上举扶墙、外侧手臂收紧 |
-| 翻滚换位 | 贴墙时按 Space | 0.58 s，团身抱膝，整体侧翻 360°，横移 1.45 m |
+| 下蹲 | 按住 Ctrl | 骨盆下降 0.38 m，髋弯 62°、膝弯 108°，蹲行 0.85 m/s，手臂前收 |
+| 贴墙躲藏 | 靠近可躲藏墙（≤0.45 m） | **真正侧身转为沿墙朝向**，靠墙那侧手臂上举扶墙，外侧手臂收紧 |
+| 翻滚换位 | 贴墙时按 Space | 0.58 s，团身抱膝，整体侧翻 360°，横移 1.5 m 到**对面墙**并贴住 |
 
 **衔接**是重点：所有状态切换都走统一的混合通道——切换瞬间记录旧姿态，
 用 `easeInOut` 在 `blendDuration` 内插值到新姿态，HUD 会显示实时的「衔接进度」。
+
+### 贴墙的进出条件（容易踩错，写清楚）
+
+- **进入**：到墙距离 ≤ `coverSnapDistance`（0.45 m），且没按 Ctrl。
+- **保持**：松手不动，或继续朝墙方向推方向键。
+- **脱离**（三种，缺一不可）：
+  1. 朝背离墙 / 沿墙的方向推方向键
+  2. 按 Ctrl 下蹲
+  3. 按 Space 翻滚到对面
+- **贴墙时速度锁为 0**，所以「按方向键能走开」这条是必需的，
+  否则玩家会被永久粘在墙上（早期版本就是这个缺陷）。
+
+判断方向用的是**墙的法线**（`coverNormal`，由墙指向角色），不是「左/右」。
+因为角色正对墙时左右会退化成 0，判断不出该往哪脱身。
 
 ---
 
@@ -35,9 +49,9 @@ assets/player-motion/
 ├── view.ts            canvas 火柴人可视化（3/4 视图 + 俯视图）
 ├── install.ts         接入层：installMotionDemo(ctx) 一行挂到引擎
 ├── preview-entry.ts   独立预览器入口（不启动引擎）
-├── build-preview.mjs  用 tsc 把上面的 TS 转译成浏览器可跑的 JS
+├── build-preview.mjs  用 tsc 转译成浏览器可跑的 JS，并生成 index.html
 ├── preview/           转译产物 + index.html，可直接开来看
-└── __tests__/         15 个单测，覆盖 FK、状态机、衔接、翻滚
+└── __tests__/         23 个单测，覆盖 FK、状态机、衔接、翻滚换位、手臂姿态
 ```
 
 依赖方向是单向的：`skeleton → pose → motion`，`input` 和 `view` 只读取它们，
@@ -53,7 +67,7 @@ import { installMotionDemo } from './player-motion/install.ts';
 
 installMotionDemo(ctx);
 // 或指定挂载点 / 出生点 / 走廊宽度
-installMotionDemo(ctx, { mount: '#game-ui', spawn: [0, 0, 0], corridorHalfWidth: 1.6 });
+installMotionDemo(ctx, { mount: '#game-ui', spawn: [0, 0, 0], corridorHalfWidth: 1.0 });
 ```
 
 本项目里实际只改了两处：`assets/scene-owner.pack.ts` 加一行 import、一行调用。
@@ -76,8 +90,15 @@ walkCycleHz / runCycleHz              // 步频
 turnSpeed                             // 转身速度（度/秒）
 crouchBlend / coverBlend              // 下蹲、贴墙的过渡时间
 rollDuration / rollDistance           // 翻滚时长与横移距离
+coverSnapDistance                     // 多近才真正贴上去（默认 0.45m）
+rollCoverSnap                         // 翻滚落地后多近算"贴住对面"（默认 0.6m）
+coverHoldDot                          // 朝墙推的判定阈值
 crouchDrop                            // 蹲下时骨盆下降量
 ```
+
+⚠️ **`rollDistance` 和走廊宽度是配套的**：演示场景 `corridorHalfWidth = 1.0`、
+身体半径 0.25，所以贴墙位置是 ±0.75，翻滚 1.5 m = 2 × 0.75，正好从一侧到另一侧。
+只改其中一个，翻滚就会落在半路（不会贴住对面）。
 
 改动作姿态本身：`poseIdle / poseGait / poseCover / poseRoll` 四个函数，
 每个返回一套 `Pose`（关节 → 欧拉角）。幅度、角度都写得很直白，改数值即可。
@@ -89,10 +110,14 @@ crouchDrop                            // 蹲下时骨盆下降量
 **方式 A：独立预览器（推荐，不需要引擎/GPU）**
 
 ```bash
-node assets/player-motion/build-preview.mjs      # 重新转译到 preview/*.js（改源码后执行）
+node assets/player-motion/build-preview.mjs      # 转译到 preview/*.js，并生成 index.html
 cd assets/player-motion/preview
 python -m http.server 15175                      # 打开 http://127.0.0.1:15175/
 ```
+
+`build-preview.mjs` 会自动生成入口页，**不需要手写 index.html**；
+它还会把所有相对 import 统一成同目录引用（早期版本把 `../x.ts` 原样输出成 `../x.js`，
+浏览器会 404）。
 
 - 默认自动演示：待机 → 步行 → 疾走 → 下蹲 → 走向墙 → 贴墙 → 翻滚
 - `?at=7` 快进到第 7 秒并冻结（截图取证用）
@@ -111,19 +136,32 @@ node node_modules/@forgeax/engine/dist/bin/forgeax.mjs project preview --port 15
 
 ## 六、验证记录
 
-- `npx vitest run assets/player-motion` → **15 个测试全过**（FK 关节长度、站姿高度、
-  四态切换、蹲下过渡、贴墙、翻滚旋转与位移、衔接进度）
+- `npx vitest run assets/player-motion` → **23 个测试全过**（FK 关节长度、站姿高度、
+  六态切换、蹲下过渡、贴墙侧身、贴墙脱身、翻滚跨到对面墙、手臂姿态、衔接进度）
 - `project check` → ok
-- `project build` → ok，动作代码进入 `program-*.js` chunk（约 14.5 KB）
+- `project build` → ok，动作代码进入 `program-*.js` chunk（约 15.4 KB）
 - 浏览器截图逐一确认：步行 1.70 m/s 摆腿、疾走 4.30 m/s 大幅摆腿前倾、
   下蹲屈膝、贴墙单手扶墙、翻滚团身翻转
 
-修复过的两个真实缺陷（都有测试或截图兜底）：
+修复过的真实缺陷（每一条都有测试或截图兜底）：
 
 1. **步态相位单位错用**：`gaitPhase` 已是弧度，`poseGait` 里又乘了 `2π`，
    导致摆腿幅度被压到 1° 以内。已修正，并加了回归测试。
 2. **角色能穿墙且穿墙后仍判定贴墙**：给探针加了 `clamp` 边界钳制，
-   并改为贴近 0.45 m 才触发贴墙、贴墙时站定、按 Ctrl 蹲下脱离。
+   并改为贴近 0.45 m 才触发贴墙。
+3. **手臂永远是 T-pose**：手臂骨段沿 ±X 伸展，绕 X 轴旋转只让手臂自转、
+   不改变指向——原来写在 `shoulder.x` 上的摆臂角度完全无效。改为
+   「Z 旋转垂下 + X 旋转前后摆」（`poseArm()` 统一处理），并加了手部高度的回归测试。
+4. **贴墙后无法移动脱身**：贴墙时 `targetSpeed = 0`，且只有按 Ctrl 能脱离，
+   玩家会被永久粘在墙上。改为朝背离墙 / 沿墙方向推方向键即可脱身，
+   方向判断基于墙的法线（正对墙时「左右」会退化）。
+5. **贴墙不是真侧身**：原来只把朝向拧 18° 假装侧身。现在真的把朝向转到沿墙方向，
+   并按重算后的左右关系决定哪只手扶墙。
+6. **翻滚方向与距离都不对**：位移原本用「角色右方」，侧身后会滚错方向；
+   距离 1.45 m 小于墙间距，永远到不了对面。改为锁存「远离起手墙」的法线方向、
+   滚 1.5 m，并把演示走廊半宽改为 1.0 —— 现在能真的从一侧滚到另一侧并贴住。
+7. **撞墙后速度不衰减**：位置被 `clamp` 但速度继续增长，HUD 显示假速度。
+   改为钳制发生时同步压掉速度。
 
 ---
 
@@ -143,9 +181,15 @@ node node_modules/@forgeax/engine/dist/bin/forgeax.mjs project preview --port 15
 ## 八、已知限制
 
 - **没有物理**：走廊边界是探针里的 `clamp` 模拟，不是真实碰撞体。接真实关卡时，
-  把 `CoverProbe` 换成射线/触发器实现即可，动作逻辑不用改。
+  把 `CoverProbe` 换成射线/触发器实现即可（实现 `query / clamp / walls` 三个方法），动作逻辑不用改。
+- **贴墙是「站定」而非「沿墙横移」**：贴住后速度锁 0，只能通过翻滚或推方向键离开。
+  真实潜行游戏通常允许贴墙横移，这需要在 `cover` 状态里单独接一条沿墙移动通道。
+- **`rollDistance` 与关卡宽度绑定**：演示用固定 1.5 m；真实关卡宽度不一时，
+  应该改成「按当前到对面墙的距离动态计算」，现在还没做。
 - **火柴人不是骨骼网格**：要换成真实角色时，把 `Pose` 的关节角度写进 Skin 的关节旋转，
   `motion.ts` 的状态机和过渡逻辑可以原样保留。
 - **未做根运动提取**：位移直接改 `rootPos`，没有 bake 成 root motion 曲线。
-- **速度是逻辑速度**：撞墙时位置被钳制但速度仍在增长（下一帧会被状态机拉回），
-  接真实物理时应改用碰撞反馈的速度。
+- **骨架命名与实际左右相反**：`shoulderL` 的骨段在 +X（角色朝向 0° 时的右方）。
+  这是早期留下的命名，改动会波及 `skeleton.ts` 与所有姿态函数，暂以注释标注（`poseCover` 里已处理）。
+- **速度是逻辑速度**：撞墙时已同步压速，但它仍不是物理求解出来的值，
+  接真实物理后应改用碰撞反馈的速度。

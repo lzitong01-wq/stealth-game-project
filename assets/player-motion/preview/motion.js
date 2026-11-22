@@ -47,12 +47,25 @@ export const MOTION_CONFIG = {
     coverBlend: 0.34,
     /** 翻滚时长。 */
     rollDuration: 0.58,
-    /** 翻滚横向位移（米）。 */
-    rollDistance: 1.45,
+    /**
+     * 翻滚横向位移（米）。
+     * 取 1.5 = 2 ×（走廊半宽 1.0 - 身体半径 0.25），
+     * 保证从一侧贴墙正好滚到另一侧贴墙——「两墙之间用翻滚换位」靠这个成立。
+     */
+    rollDistance: 1.5,
     /** 触发贴墙的最大距离。 */
     coverEnterDistance: 1.15,
+    /** 贴近到这个距离以内才真正进入贴墙（更远只是「附近有墙」）。 */
+    coverSnapDistance: 0.45,
+    /** 翻滚结束后，距离墙多近算「落到对面掩体」。 */
+    rollCoverSnap: 0.6,
     /** 贴墙时可移动的最大速度（超过则脱离）。 */
     coverExitSpeed: 0.6,
+    /**
+     * 贴墙时朝墙推的方向阈值：超过它算「想贴住」，低于它算「想离开」。
+     * 松手（无输入）时保持贴墙，不会自己弹开。
+     */
+    coverHoldDot: 0.55,
     /** 蹲下时骨盆下降量（米）。 */
     crouchDrop: 0.38,
 };
@@ -75,8 +88,10 @@ export function createMotion(spawn = [0, 0, 0]) {
         crouchAmount: 0,
         coverAmount: 0,
         rollT: 0,
+        rollVec: [0, 0, 1],
         rollDir: 1,
         rollFromSide: 1,
+        coverSide: 1,
         wasRollPressed: false,
     };
 }
@@ -93,16 +108,37 @@ function setState(rt, next, blendDuration) {
 /* ------------------------------------------------------------------ *
  * 各状态的目标姿态
  * ------------------------------------------------------------------ */
-/** 站立待机：极轻微呼吸与手臂自然下垂。 */
+/**
+ * 设置一条手臂的姿态。
+ *
+ * ⚠️ 这里有个必须记住的几何事实：上臂/前臂骨段沿 ±X 伸展（见 BONE_OFFSET），
+ * 所以「绕 X 轴旋转」只会让手臂自转，完全不改变它的指向。
+ * 把摆臂角度写在 shoulder.x 上是无效的 —— 这正是早期版本手臂一直是 T-pose 的原因。
+ *
+ * 正确写法：
+ *   1. 用 Z 旋转把手臂从平举转到自然下垂（欧拉顺序 Ry*Rx*Rz，Rz 先作用）
+ *   2. 再用手臂侧的 X 旋转做前后摆（此时手臂已沿 -Y，X 旋转才产生矢状面摆动）
+ *
+ * @param side  -1 = 沿 +X 那条（shoulderL），1 = 沿 -X 那条（shoulderR）
+ * @param down  垂下角度：0 = 平举，90 = 完全垂在体侧
+ * @param swing 前后摆（度，正 = 向后）
+ * @param bend  肘弯曲（度，正 = 前臂向前）
+ * @param tuck  肘外展（度，正 = 前臂向外张开）
+ */
+function poseArm(p, side, down, swing, bend, tuck = 0) {
+    const sh = side < 0 ? 'shoulderL' : 'shoulderR';
+    const el = side < 0 ? 'elbowL' : 'elbowR';
+    p[sh] = [swing, 0, side * down];
+    p[el] = [-bend, 0, side * tuck];
+}
+/** 站立待机：手臂自然下垂，极轻微呼吸。 */
 function poseIdle(t) {
     const p = restPose();
     const breathe = Math.sin(t * 1.6) * 1.2;
     p.chest = [breathe, 0, 0];
     p.head = [-breathe * 0.5, 0, 0];
-    p.shoulderL = [0, 0, -6];
-    p.shoulderR = [0, 0, 6];
-    p.elbowL = [0, 0, 10];
-    p.elbowR = [0, 0, -10];
+    poseArm(p, -1, 74, breathe * 0.8, 14, 7);
+    poseArm(p, 1, 74, breathe * 0.8, 14, 7);
     return p;
 }
 /**
@@ -122,19 +158,22 @@ function poseGait(phase, amp, kneeAmp, lean, crouch) {
     // 支撑腿膝盖抬起时弯曲，摆动腿更弯
     const kneeL = Math.max(0, -Math.sin(a)) * kneeAmp;
     const kneeR = Math.max(0, -Math.sin(a + Math.PI)) * kneeAmp;
-    // 手臂反向摆动
-    const armL = -swingL * 0.55;
-    const armR = -swingR * 0.55;
+    // 腿：摆动 + 蹲下屈曲（髋前屈 62°、膝后折 108°、踝背屈）
     p.hipL = [swingL + crouch * 62, 0, 0];
     p.hipR = [swingR + crouch * 62, 0, 0];
     p.kneeL = [-kneeL - crouch * 108, 0, 0];
     p.kneeR = [-kneeR - crouch * 108, 0, 0];
     p.ankleL = [kneeL * 0.35 + crouch * 46, 0, 0];
     p.ankleR = [kneeR * 0.35 + crouch * 46, 0, 0];
-    p.shoulderL = [armL, 0, -8];
-    p.shoulderR = [armR, 0, 8];
-    p.elbowL = [0, 0, 14 + Math.max(0, armL) * 0.4];
-    p.elbowR = [0, 0, -14 - Math.max(0, armR) * 0.4];
+    // 手臂反向摆动：左腿前摆时右臂前摆（对侧摆臂）
+    // 摆幅比腿小，符合真实步态；蹲下时手臂前收、肘弯明显加大，避免"蹲着的 T-pose"
+    const armSwingL = -swingL * 0.85;
+    const armSwingR = -swingR * 0.85;
+    const armDown = 74 - crouch * 10;
+    const armBend = 14 + crouch * 50;
+    const armCrouchSwing = -crouch * 18;
+    poseArm(p, -1, armDown, armSwingL + armCrouchSwing, armBend, 7);
+    poseArm(p, 1, armDown, armSwingR + armCrouchSwing, armBend, 7);
     // 躯干：跑步前倾 + 步态带来的轻微上下起伏（用脊柱俯仰近似）
     p.spine = [lean * 0.45 + crouch * 10, 0, 0];
     p.chest = [lean * 0.35 + crouch * 8, 0, Math.sin(a) * 2.5];
@@ -160,16 +199,12 @@ function poseCover(side, t) {
     p.chest = [2 + breathe, 0, side * -5];
     p.neck = [-4, 0, side * 3];
     p.head = [-2, 0, side * 4];
-    // 内侧手臂上举贴墙
-    const inner = side < 0 ? 'shoulderL' : 'shoulderR';
-    const innerElbow = side < 0 ? 'elbowL' : 'elbowR';
-    p[inner] = [110, 0, side * 18];
-    p[innerElbow] = [0, 0, side * 70];
-    // 外侧手臂收紧在身前
-    const outer = side < 0 ? 'shoulderR' : 'shoulderL';
-    const outerElbow = side < 0 ? 'elbowR' : 'elbowL';
-    p[outer] = [32, 0, side * 10];
-    p[outerElbow] = [0, 0, side * -55];
+    // 注意骨架命名与实际左右相反：shoulderL 的骨段沿 +X，
+    // 而角色朝向 0° 时「右方」也是 +X。所以「墙在 +X 侧」要抬的是 shoulderL。
+    // 内侧（靠墙那侧）手臂上举扶墙：down 取负值 = 抬到平举以上
+    poseArm(p, (side * -1), -22, -6, 22, 24);
+    // 外侧手臂收紧在身前，肘弯得多一些，像个"缩起来"的躲藏姿势
+    poseArm(p, side, 58, -34, 82, 42);
     // 双腿微屈，内侧腿承担重心
     p.hipL = [10, 0, 0];
     p.hipR = [14, 0, 0];
@@ -195,10 +230,13 @@ function poseRoll(t) {
     p.kneeR = [-124 * tuck, 0, 0];
     p.ankleL = [34 * tuck, 0, 0];
     p.ankleR = [32 * tuck, 0, 0];
-    p.shoulderL = [58 * tuck, 0, -22 * tuck];
-    p.shoulderR = [58 * tuck, 0, 22 * tuck];
-    p.elbowL = [0, 0, 96 * tuck];
-    p.elbowR = [0, 0, -96 * tuck];
+    // 抱膝：手臂前伸环抱小腿（tuck=0 时恢复自然下垂）
+    const armDown = 74 - 40 * tuck;
+    const armSwing = -52 * tuck;
+    const armBend = 20 + 100 * tuck;
+    const armTuck = 7 + 16 * tuck;
+    poseArm(p, -1, armDown, armSwing, armBend, armTuck);
+    poseArm(p, 1, armDown, armSwing, armBend, armTuck);
     return p;
 }
 /* ------------------------------------------------------------------ *
@@ -224,7 +262,9 @@ export function stepMotion(rt, input, dt) {
     }
     const wantsMove = Math.hypot(ix, iz) > 0.12;
     // ---- 2. 目标朝向：朝输入方向转 ----
-    if (wantsMove) {
+    // 贴墙时朝向交给「沿墙方向」处理，翻滚时朝向交给整体旋转，
+    // 两者都不能被输入方向覆盖，否则会跟第 6 步打架。
+    if (wantsMove && rt.state !== 'cover' && rt.state !== 'roll') {
         const targetFacing = (Math.atan2(ix, iz) * 180) / Math.PI;
         let diff = targetFacing - rt.facing;
         while (diff > 180)
@@ -243,8 +283,20 @@ export function stepMotion(rt, input, dt) {
         rt.crouchAmount = Math.max(crouchTarget, rt.crouchAmount - step / cfg.crouchBlend);
     }
     // ---- 4. 贴墙判定 ----
-    // 贴近墙（<= 0.45m）且没在下蹲 → 可贴墙。贴墙时角色站定，按 Ctrl 蹲下即可脱离。
-    const nearCover = input.coverAvailable && input.coverDistance <= 0.45 && !input.crouch;
+    // 贴近墙且没在下蹲 → 可贴墙。贴墙时角色站定，脱离方式：
+    //   1. 按 Ctrl 下蹲（贴墙时下蹲 = 起身离开）
+    //   2. 朝背离墙 / 沿墙的方向推方向键
+    //   3. 按 Space 翻滚到对面
+    // 第 2 条是必需的：否则贴墙后速度被锁为 0，玩家会被永久粘在墙上。
+    // 用「墙的法线」而不是「左右侧」判断方向：正对墙时左右会退化。
+    const coverNormal = input.coverNormal ?? (input.coverSide > 0 ? [-1, 0, 0] : [1, 0, 0]);
+    // 输入与「墙→角色」同向 = 在往墙里推（正）；反向 = 想离开（负）
+    const pushIntoWall = -(ix * coverNormal[0] + iz * coverNormal[2]);
+    const wantsLeaveCover = wantsMove && pushIntoWall < 0.4;
+    const nearCover = input.coverAvailable &&
+        input.coverDistance <= cfg.coverSnapDistance &&
+        !input.crouch &&
+        !wantsLeaveCover;
     // ---- 5. 翻滚：优先级最高 ----
     const rollEdge = input.rollPressed && !rt.wasRollPressed;
     rt.wasRollPressed = input.rollPressed;
@@ -252,8 +304,9 @@ export function stepMotion(rt, input, dt) {
         rt.rollT += step / cfg.rollDuration;
         if (rt.rollT >= 1) {
             rt.rollT = 1;
-            // 翻滚结束：如果换到的那侧仍有掩体，回到 cover，否则待机
-            if (input.coverAvailable && input.coverDistance <= cfg.coverEnterDistance) {
+            // 翻滚结束：落到对面墙附近就继续贴墙，否则起身
+            if (input.coverAvailable && input.coverDistance <= cfg.rollCoverSnap) {
+                rt.coverSide = input.coverSide;
                 setState(rt, 'cover', cfg.coverBlend * 0.5);
                 rt.coverAmount = 1;
             }
@@ -267,7 +320,14 @@ export function stepMotion(rt, input, dt) {
         setState(rt, 'roll', 0.1);
         rt.rollT = 0;
         rt.rollFromSide = input.coverSide;
-        rt.rollDir = input.coverSide > 0 ? -1 : 1; // 向远离墙的一侧滚
+        rt.coverSide = input.coverSide;
+        // 位移方向 = 墙的法线方向（法线本身就是「由墙指向角色」= 远离墙），锁存下来
+        rt.rollVec = [coverNormal[0], 0, coverNormal[2]];
+        // 翻转方向跟随位移方向相对角色的左右
+        const yawR = (rt.facing * Math.PI) / 180;
+        const rightX = Math.cos(yawR);
+        const rightZ = -Math.sin(yawR);
+        rt.rollDir = rt.rollVec[0] * rightX + rt.rollVec[2] * rightZ >= 0 ? 1 : -1;
         rt.coverAmount = 1;
         rt.speed = 0;
     }
@@ -278,6 +338,7 @@ export function stepMotion(rt, input, dt) {
             if (rt.state !== 'cover') {
                 setState(rt, 'cover', cfg.coverBlend);
             }
+            rt.coverSide = input.coverSide;
             rt.coverAmount = Math.min(1, rt.coverAmount + step / cfg.coverBlend);
         }
         else {
@@ -299,6 +360,31 @@ export function stepMotion(rt, input, dt) {
             }
         }
     }
+    // ---- 6.5 贴墙转身：转成「沿墙侧身」，而不是正面贴着墙 ----
+    // 只把朝向拧十几度是假侧身，看起来还是正面撞墙。
+    // 这里真的把朝向转到沿墙方向，再据此重算"墙在左还是右"，
+    // 保证扶墙的手臂始终是靠墙那一只。
+    if (rt.state === 'cover') {
+        // 沿墙方向 = normal × up
+        const tx = -coverNormal[2];
+        const tz = coverNormal[0];
+        const fwdX = Math.sin((rt.facing * Math.PI) / 180);
+        const fwdZ = Math.cos((rt.facing * Math.PI) / 180);
+        // 两个沿墙方向里选离当前朝向更近的，避免 180° 猛转
+        const sgn = fwdX * tx + fwdZ * tz >= 0 ? 1 : -1;
+        const targetFacing = (Math.atan2(tx * sgn, tz * sgn) * 180) / Math.PI;
+        let d = targetFacing - rt.facing;
+        while (d > 180)
+            d -= 360;
+        while (d < -180)
+            d += 360;
+        const maxTurn = cfg.turnSpeed * step;
+        rt.facing += clamp(d, -maxTurn, maxTurn);
+        // normal 由墙指向角色：与「角色右方」同向 → 说明墙在角色左侧
+        const yawR = (rt.facing * Math.PI) / 180;
+        const dotRight = coverNormal[0] * Math.cos(yawR) + coverNormal[2] * -Math.sin(yawR);
+        rt.coverSide = dotRight > 0 ? -1 : 1;
+    }
     // ---- 7. 速度 ----
     let targetSpeed = 0;
     if (rt.state === 'walk')
@@ -318,15 +404,14 @@ export function stepMotion(rt, input, dt) {
     const yawRad = (rt.facing * Math.PI) / 180;
     const fwd = [Math.sin(yawRad), 0, Math.cos(yawRad)];
     if (rt.state === 'roll') {
-        // 翻滚：横向位移由进度曲线控制，起手快、收尾缓
+        // 翻滚：沿「远离起手墙」的方向横移，起手快、收尾缓
         const prevT = clamp(rt.rollT - step / cfg.rollDuration, 0, 1);
         const delta = easeInOut(rt.rollT) - easeInOut(prevT);
-        const sideX = Math.cos(yawRad) * rt.rollDir;
-        const sideZ = -Math.sin(yawRad) * rt.rollDir;
+        const move = cfg.rollDistance * delta;
         rt.rootPos = [
-            rt.rootPos[0] + sideX * cfg.rollDistance * delta,
+            rt.rootPos[0] + rt.rollVec[0] * move,
             rt.rootPos[1],
-            rt.rootPos[2] + sideZ * cfg.rollDistance * delta,
+            rt.rootPos[2] + rt.rollVec[2] * move,
         ];
     }
     else if (rt.speed > 0.001) {
@@ -350,7 +435,7 @@ export function stepMotion(rt, input, dt) {
         target = poseRoll(clamp(rt.rollT * cfg.rollDuration, 0, 1));
     }
     else if (rt.state === 'cover') {
-        target = poseCover(input.coverSide, rt.stateTime);
+        target = poseCover(rt.coverSide, rt.stateTime);
     }
     else if (rt.state === 'crouch') {
         target = poseGait(rt.gaitPhase, 14, 26, 6, rt.crouchAmount);
@@ -383,9 +468,8 @@ export function stepMotion(rt, input, dt) {
         rt.rootEuler = [0, 0, -360 * easeInOut(t) * rt.rollDir];
     }
     else if (rt.state === 'cover') {
-        // 贴墙时身体朝墙略偏，视觉上更像"侧身靠墙"
-        const lean = input.coverSide * -18 * rt.coverAmount;
-        rt.rootEuler = [0, rt.facing + lean, 0];
+        // 已经真的转成沿墙侧身了，这里不再额外拧朝向（以前那 18° 是为了假装侧身）
+        rt.rootEuler = [0, rt.facing, 0];
     }
     else {
         rt.rootEuler = [0, rt.facing, 0];

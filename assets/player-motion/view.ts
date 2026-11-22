@@ -152,35 +152,78 @@ function drawGround(ctx: CanvasRenderingContext2D, view: ViewBox, rootY: number,
   ctx.stroke();
 }
 
-/** 俯视图里画掩体墙（贴墙时显示）。 */
-function drawCoverWall(
+/**
+ * 俯视图里画走廊两面墙。
+ *
+ * 之前只在「已进入可贴墙范围」时才画一条细线，导致玩家在走廊中间
+ * 完全不知道墙在哪，也看不出翻滚有没有跨到对面。现在改成：
+ *   - 两面墙始终显示（半透明）
+ *   - 当前贴住的那面高亮加粗，并标出「掩体」
+ *   - 按真实世界坐标投影，角色转身后墙会跟着斜过来，不是固定的竖线
+ */
+function drawWalls(
   ctx: CanvasRenderingContext2D,
   view: ViewBox,
-  side: -1 | 1,
-  distance: number,
-  scale: number,
+  walls: readonly { a: Vec3; b: Vec3 }[],
+  root: Vec3,
+  fwd: Vec3,
   active: boolean,
 ): void {
-  const cx = view.x + view.w * 0.5 + side * distance * scale;
-  ctx.beginPath();
-  ctx.strokeStyle = active ? WALL_COLOR : 'rgba(224, 82, 82, 0.35)';
-  ctx.lineWidth = active ? 3 : 1.5;
-  ctx.moveTo(cx, view.y + 14);
-  ctx.lineTo(cx, view.y + view.h - 14);
-  ctx.stroke();
+  const centerX = view.x + view.w * 0.5;
+  const centerY = view.y + view.h * 0.58;
+  const toScreen = (p: Vec3): readonly [number, number] => {
+    const q = projectTop(p, root, fwd);
+    return [centerX + q[0] * view.scale, centerY - q[1] * view.scale];
+  };
 
-  if (active) {
-    ctx.fillStyle = WALL_COLOR;
-    ctx.font = '10px system-ui, sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'bottom';
-    ctx.fillText('掩体', cx, view.y + view.h - 4);
-  }
+  // 哪面墙离角色最近（演示墙沿 Z 延伸，取 X 方向差即垂直距离）。
+  // 用距离而不是屏幕左右判断，角色转身后也不会高亮错墙。
+  const dists = walls.map((w) => Math.abs(w.a[0] - root[0]));
+  const nearest = dists.indexOf(Math.min(...dists));
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(view.x + 1, view.y + 1, view.w - 2, view.h - 2);
+  ctx.clip();
+
+  walls.forEach((w, i) => {
+    const a = toScreen(w.a);
+    const b = toScreen(w.b);
+    const isActive = active && i === nearest;
+    const wallSide: -1 | 1 = a[0] - centerX >= 0 ? 1 : -1;
+
+    ctx.beginPath();
+    ctx.strokeStyle = isActive ? WALL_COLOR : 'rgba(224, 82, 82, 0.5)';
+    ctx.lineWidth = isActive ? 4 : 2;
+    ctx.lineCap = 'round';
+    ctx.moveTo(a[0], a[1]);
+    ctx.lineTo(b[0], b[1]);
+    ctx.stroke();
+
+    if (isActive) {
+      // 在墙靠内一侧标「掩体」
+      const lx = a[0] + (wallSide > 0 ? -12 : 12);
+      ctx.fillStyle = WALL_COLOR;
+      ctx.font = '10px system-ui, sans-serif';
+      ctx.textAlign = wallSide > 0 ? 'right' : 'left';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('掩体', lx, centerY);
+    }
+  });
+  ctx.restore();
 }
 
 export interface MotionView {
-  /** 每帧调用。 */
-  render(rt: MotionRuntime, input: { coverAvailable: boolean; coverSide: -1 | 1; coverDistance: number }): void;
+  /** 每帧调用。walls 可选：给了就常显走廊墙体。 */
+  render(
+    rt: MotionRuntime,
+    input: {
+      coverAvailable: boolean;
+      coverSide: -1 | 1;
+      coverDistance: number;
+      walls?: readonly { a: Vec3; b: Vec3 }[];
+    },
+  ): void;
   dispose(): void;
 }
 
@@ -199,11 +242,18 @@ export function createMotionView(parent: HTMLElement): MotionView | null {
   }
 
   const sideView: ViewBox = { x: 12, y: 34, w: 212, h: 300, scale: 96 };
-  const topView: ViewBox = { x: 236, y: 34, w: 212, h: 300, scale: 96 };
+  // 俯视缩放比侧视小：角色贴在任一侧时，对面墙距离 1.75m，
+  // 56 × 1.75 ≈ 98px < 106px（半框宽），两面墙才能同时落进框里
+  const topView: ViewBox = { x: 236, y: 34, w: 212, h: 300, scale: 56 };
 
   function render(
     rt: MotionRuntime,
-    input: { coverAvailable: boolean; coverSide: -1 | 1; coverDistance: number },
+    input: {
+      coverAvailable: boolean;
+      coverSide: -1 | 1;
+      coverDistance: number;
+      walls?: readonly { a: Vec3; b: Vec3 }[];
+    },
   ): void {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
@@ -236,9 +286,23 @@ export function createMotionView(parent: HTMLElement): MotionView | null {
     const yawRad = (rt.facing * Math.PI) / 180;
     const fwd: Vec3 = [Math.sin(yawRad), 0, Math.cos(yawRad)];
 
-    // 俯视掩体
-    if (input.coverAvailable) {
-      drawCoverWall(ctx, topView, input.coverSide, input.coverDistance, topView.scale, rt.state === 'cover');
+    // 俯视：角色身体轮廓（半径 = 身体碰撞半径）。
+    // 贴住墙时这个圆会正好与墙线相切，比只看骨架更容易判断"到底贴没贴上"。
+    {
+      const cx = topView.x + topView.w * 0.5;
+      const cy = topView.y + topView.h * 0.58;
+      ctx.beginPath();
+      ctx.fillStyle = 'rgba(127, 227, 212, 0.12)';
+      ctx.arc(cx, cy, 0.25 * topView.scale, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(127, 227, 212, 0.5)';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    }
+
+    // 俯视：走廊两面墙（常显，贴住的那面高亮）
+    if (input.walls && input.walls.length > 0) {
+      drawWalls(ctx, topView, input.walls, rt.rootPos, fwd, rt.state === 'cover');
     }
 
     // 上一状态残留姿态（幽灵），直观展示"衔接"
