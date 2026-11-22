@@ -12,7 +12,7 @@
  */
 
 import { createMotion, stepMotion, type MotionRuntime } from './motion.ts';
-import { createMotionView } from './view.ts';
+import { createMotionView3D, type MotionView3D } from './view3d.ts';
 import { createCorridorProbe, createKeyboardInput, toMotionInput } from './input.ts';
 
 const params = new URLSearchParams(location.search);
@@ -23,12 +23,12 @@ const autoScript = params.get('script') !== '0';
 
 const stage = document.createElement('div');
 stage.style.cssText =
-  'position:relative;width:100vw;height:100vh;margin:0;background:#0a1114;overflow:hidden;';
+  'position:relative;width:100vw;height:100vh;margin:0;background:#070d10;overflow:hidden;';
 document.body.style.margin = '0';
-document.body.style.background = '#0a1114';
+document.body.style.background = '#070d10';
 document.body.appendChild(stage);
 
-const view = createMotionView(stage);
+const view: MotionView3D | null = createMotionView3D(stage, 780, 560);
 if (view === null) throw new Error('canvas 2d context unavailable');
 
 // 调试行：确认 URL 参数与当前状态（截图取证时很有用）

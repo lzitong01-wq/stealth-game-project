@@ -3,8 +3,16 @@
 天工引擎（ForgeAX 0.4.8）上的玩家动作模块：步行、疾走、下蹲、贴墙躲藏、翻滚换位，
 以及它们之间的**姿态衔接**。不含跳跃、美术和关卡。
 
-骨架用**多关节火柴人**表达（19 个关节），可视化是 `#game-ui` 上的 canvas 双视图，
-不依赖相机、光照、材质和 mesh——所以在没有美术资源、甚至没有 WebGPU 的环境里也能验证动作。
+骨架是 **19 个关节的层级**，可视化有两条路径，共用同一份关节解算结果：
+
+- `mesh3d.ts`：**引擎内真 3D 白模**（`MeshFilter` + `MeshRenderer` + 等距相机 + 平行光）。
+  合并进主项目后就是 2.5D 场景里的角色，能被相机、光照、后期正常影响。**默认走这条。**
+- `view3d.ts`：canvas 2D 手写等距渲染（盒体六面 + 画家算法 + 方向光）。
+  不依赖 WebGPU，用于无 GPU 环境验证与截图取证。
+
+白模规格参考了 **Tomcasso 的 `LowPolySceneSetup.cs`**（每个关节挂一个 Cube、用 scale 表达粗细）
+与 **ZDD-cy 的 45° 等距斜俯视**；差别在于动作层已经直接给出关节世界坐标，
+所以不需要在引擎里重建父子层级，每帧把「骨段中点 + 朝向四元数 + 长度」写进 Transform 即可。
 
 ---
 
@@ -46,7 +54,9 @@ assets/player-motion/
 ├── pose.ts            姿态与 FK：欧拉角 → 世界坐标（纯数学，无引擎依赖）
 ├── motion.ts          动作状态机 + 姿态生成 + 过渡混合（核心）
 ├── input.ts           键盘采集 + 掩体探针（走廊式双墙）
-├── view.ts            canvas 火柴人可视化（3/4 视图 + 俯视图）
+├── view.ts            canvas 火柴人（2D 平面，保留作排查用）
+├── view3d.ts          canvas 等距 3D 白模（盒体 + 深度排序 + 方向光，可截图验证）
+├── mesh3d.ts          引擎真 3D 白模（MeshFilter + MeshRenderer + 相机 + 光照）
 ├── install.ts         接入层：installMotionDemo(ctx) 一行挂到引擎
 ├── preview-entry.ts   独立预览器入口（不启动引擎）
 ├── build-preview.mjs  用 tsc 转译成浏览器可跑的 JS，并生成 index.html
@@ -65,9 +75,11 @@ assets/player-motion/
 // 任何 engine realm 插件的 apply(ctx) 里
 import { installMotionDemo } from './player-motion/install.ts';
 
-installMotionDemo(ctx);
-// 或指定挂载点 / 出生点 / 走廊宽度
-installMotionDemo(ctx, { mount: '#game-ui', spawn: [0, 0, 0], corridorHalfWidth: 1.0 });
+installMotionDemo(ctx);                                  // 默认：引擎 3D 白模
+installMotionDemo(ctx, { view: 'canvas2d' });            // 无 GPU 时的降级视图
+installMotionDemo(ctx, { ownCamera: false });             // 主项目已有相机
+installMotionDemo(ctx, { view: 'none' });                 // 只要动作数据
+installMotionDemo(ctx, { spawn: [0, 0, 0], corridorHalfWidth: 1.0 });
 ```
 
 本项目里实际只改了两处：`assets/scene-owner.pack.ts` 加一行 import、一行调用。
@@ -119,7 +131,8 @@ python -m http.server 15175                      # 打开 http://127.0.0.1:15175
 它还会把所有相对 import 统一成同目录引用（早期版本把 `../x.ts` 原样输出成 `../x.js`，
 浏览器会 404）。
 
-- 默认自动演示：待机 → 步行 → 疾走 → 下蹲 → 走向墙 → 贴墙 → 翻滚
+- 默认自动演示：待机 → 步行 → 疾走 → 下蹲 → 走向墙 → 贴墙 → 翻滚 → 落地贴对面
+- 预览器用的是 `view3d.ts`（canvas 等距 3D 白模），不需要 GPU
 - `?at=7` 快进到第 7 秒并冻结（截图取证用）
 - `?script=0` 改为键盘控制
 
@@ -193,3 +206,12 @@ node node_modules/@forgeax/engine/dist/bin/forgeax.mjs project preview --port 15
   这是早期留下的命名，改动会波及 `skeleton.ts` 与所有姿态函数，暂以注释标注（`poseCover` 里已处理）。
 - **速度是逻辑速度**：撞墙时已同步压速，但它仍不是物理求解出来的值，
   接真实物理后应改用碰撞反馈的速度。
+- **`mesh3d` 没在无 GPU 环境验证过渲染**：本机无头浏览器 `requestAdapter()` 返回 null，
+  截图只能验证 `view3d`（canvas 版）。`mesh3d` 的构建、类型、实体装配都验过
+  （spawn 多组件、共享 mesh 复用、每帧 Transform 写入均有实测），
+  但**最终画面需要在有 GPU 的浏览器里确认**。材质参数名（`baseColor`）与光照强度
+  是最可能需要微调的两处。
+- **`mesh3d` 的相机宽高比取自 `window`**：插件里拿不到 renderer 真实尺寸，
+  窗口与画布比例不一致时会轻微变形。主项目已有相机时请传 `ownCamera: false`。
+- **贴墙朝向是「转到沿墙」，不是「贴上去」**：角色与墙面之间仍有 0.3m（身体半径）。
+  真实项目里应由碰撞体/胶囊把角色压到墙面，动作层只负责姿态。

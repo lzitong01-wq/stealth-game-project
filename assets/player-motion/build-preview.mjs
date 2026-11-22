@@ -17,7 +17,15 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const outDir = path.join(here, 'preview');
 fs.mkdirSync(outDir, { recursive: true });
 
-const files = ['skeleton.ts', 'pose.ts', 'motion.ts', 'view.ts', 'input.ts', 'preview-entry.ts'];
+const files = [
+  'skeleton.ts',
+  'pose.ts',
+  'motion.ts',
+  'view.ts',
+  'view3d.ts',
+  'input.ts',
+  'preview-entry.ts',
+];
 
 for (const f of files) {
   const full = path.join(here, f);

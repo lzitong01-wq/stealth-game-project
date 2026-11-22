@@ -11,7 +11,7 @@
  *   ?freeze=14  推进到第 14 秒后冻结，便于截图固定姿态
  */
 import { createMotion, stepMotion } from './motion.js';
-import { createMotionView } from './view.js';
+import { createMotionView3D } from './view3d.js';
 import { createCorridorProbe, createKeyboardInput, toMotionInput } from './input.js';
 const params = new URLSearchParams(location.search);
 /** ?at=12 → 用固定步长快进到第 12 秒并冻结，适合截图取证。 */
@@ -20,11 +20,11 @@ const freezeAt = params.has('freeze') ? Number(params.get('freeze')) : null;
 const autoScript = params.get('script') !== '0';
 const stage = document.createElement('div');
 stage.style.cssText =
-    'position:relative;width:100vw;height:100vh;margin:0;background:#0a1114;overflow:hidden;';
+    'position:relative;width:100vw;height:100vh;margin:0;background:#070d10;overflow:hidden;';
 document.body.style.margin = '0';
-document.body.style.background = '#0a1114';
+document.body.style.background = '#070d10';
 document.body.appendChild(stage);
-const view = createMotionView(stage);
+const view = createMotionView3D(stage, 780, 560);
 if (view === null)
     throw new Error('canvas 2d context unavailable');
 // 调试行：确认 URL 参数与当前状态（截图取证时很有用）

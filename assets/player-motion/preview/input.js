@@ -15,7 +15,7 @@
  *   - 翻滚位移 1.5m = 2 × 0.75，正好从一侧贴墙滚到另一侧贴墙，
  *     这样「在两个墙壁之间用翻滚转换躲藏位置」才真的成立。
  */
-export function createCorridorProbe(halfWidth = 1.0, trigger = 1.15, bodyRadius = 0.25) {
+export function createCorridorProbe(halfWidth = 1.0, trigger = 1.15, bodyRadius = 0.3) {
     const clampAxis = (px) => Math.min(halfWidth - bodyRadius, Math.max(-(halfWidth - bodyRadius), px));
     return {
         query(position, facingDeg) {
