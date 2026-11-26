@@ -63,7 +63,10 @@ namespace PlayerMotion
             var cover = Probe.Query(Runtime.RootPos, Runtime.Facing);
 
             // 2. 读输入并推进状态机
-            var input = MotionInputReader.Read(cover);
+            // 传入相机前向：WASD 是屏幕方向，要按相机朝向解算成世界方向，
+            // 否则相机会斜着摆、而人按世界轴走，手感就是「W 往镜头里跑」。
+            var camFwd = TargetCamera != null ? TargetCamera.transform.forward : Vector3.forward;
+            var input = MotionInputReader.Read(cover, camFwd);
             MotionSystem.Step(Runtime, input, Time.deltaTime, Config);
 
             // 3. 边界钳制：撞墙时同步压速，避免 HUD 显示假速度

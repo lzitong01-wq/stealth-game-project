@@ -31,6 +31,7 @@ namespace PlayerMotion.EditorTools
             ValidateSkeleton(solver);
             ValidateCrouch(cfg, solver);
             ValidateArms(cfg, solver);
+            ValidateInputDirection();
             ValidateCoverAndRoll(cfg);
 
             string summary = $"[PlayerMotion] 校验完成：通过 {_pass} 项，失败 {_fail} 项";
@@ -145,6 +146,53 @@ namespace PlayerMotion.EditorTools
             var hand2 = solver.Positions[(int)Joint.HandL];
             // 回归：肘弯曲曾写在 X 旋转上（前臂骨段沿 X，只自转不折），导致肘永远是直的
             Check(hand2.z - sh2.z > 0.12f, $"肘弯曲应生效：手在肩前方 {hand2.z - sh2.z:F3}m");
+        }
+
+        // ---------------------------------------------------------------- 输入方向
+
+        /// <summary>
+        /// WASD 必须按相机朝向解算。
+        ///
+        /// 回归：曾经直接把按键当世界方向，而相机摆在 +Z 侧朝 -Z 看，
+        /// 结果按 W 人是往镜头里跑的 —— 手感就是「前后完全相反」。
+        /// </summary>
+        private static void ValidateInputDirection()
+        {
+            // 相机朝 +Z：屏幕上方 = 世界 +Z，屏幕右 = 世界 +X
+            MotionInputReader.ToWorldMove(0f, 1f, Vector3.forward, out float wx, out float wz);
+            Check(Mathf.Abs(wx) < 0.01f && Mathf.Abs(wz - 1f) < 0.01f,
+                $"相机朝 +Z 时按 W 应朝 +Z（得到 {wx:F2},{wz:F2}）");
+
+            // 相机朝 -Z：屏幕上方 = 世界 -Z，屏幕右 = 世界 -X
+            MotionInputReader.ToWorldMove(0f, 1f, Vector3.back, out wx, out wz);
+            Check(Mathf.Abs(wx) < 0.01f && Mathf.Abs(wz + 1f) < 0.01f,
+                $"相机朝 -Z 时按 W 应朝 -Z（得到 {wx:F2},{wz:F2}）");
+
+            MotionInputReader.ToWorldMove(1f, 0f, Vector3.back, out wx, out wz);
+            Check(Mathf.Abs(wx + 1f) < 0.01f && Mathf.Abs(wz) < 0.01f,
+                $"相机朝 -Z 时按 D 应朝 -X（得到 {wx:F2},{wz:F2}）");
+
+            // 用 PlayerMotionController 的实际相机摆法验证：
+            //   相机位置 = (sin(yaw)*D, H, cos(yaw)*D)，看向 (0, lookHeight, 0)
+            const float yawDeg = -35f, dist = 2.6f, height = 5.0f, lookY = 0.9f;
+            float yaw = yawDeg * Mathf.Deg2Rad;
+            var camPos = new Vector3(Mathf.Sin(yaw) * dist, height, Mathf.Cos(yaw) * dist);
+            var camForward = new Vector3(0f, lookY, 0f) - camPos;
+            MotionInputReader.ToWorldMove(0f, 1f, camForward, out wx, out wz);
+
+            var expect = new Vector3(camForward.x, 0f, camForward.z).normalized;
+            Check(Mathf.Abs(wx - expect.x) < 0.02f && Mathf.Abs(wz - expect.z) < 0.02f,
+                $"按 W 应与相机水平前向一致（得到 {wx:F2},{wz:F2}，期望 {expect.x:F2},{expect.z:F2}）");
+
+            // 最关键的一条：相机在 +Z 侧朝 -Z 看，W 的 z 分量必须为负。
+            // 修复前这里是 +1，正是「前后相反」的现象。
+            Check(wz < 0f,
+                $"相机在 +Z 侧朝 -Z 看时按 W 的 z 必须为负（得到 {wz:F2}；>0 就是前后反了）");
+
+            // 没有相机时退化为世界方向（不能崩、不能给全零）
+            MotionInputReader.ToWorldMove(1f, 1f, Vector3.zero, out wx, out wz);
+            Check(Mathf.Abs(wx - 1f) < 0.01f && Mathf.Abs(wz - 1f) < 0.01f,
+                $"无相机信息时应退化为世界方向（得到 {wx:F2},{wz:F2}）");
         }
 
         // ---------------------------------------------------------------- 贴墙与翻滚
