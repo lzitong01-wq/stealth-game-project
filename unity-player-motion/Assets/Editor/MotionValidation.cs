@@ -174,7 +174,7 @@ namespace PlayerMotion.EditorTools
 
             // 用 PlayerMotionController 的实际相机摆法验证：
             //   相机位置 = (sin(yaw)*D, H, cos(yaw)*D)，看向 (0, lookHeight, 0)
-            const float yawDeg = -35f, dist = 2.6f, height = 5.0f, lookY = 0.9f;
+            const float yawDeg = -35f, dist = 3.8f, height = 4.7f, lookY = 0.9f;
             float yaw = yawDeg * Mathf.Deg2Rad;
             var camPos = new Vector3(Mathf.Sin(yaw) * dist, height, Mathf.Cos(yaw) * dist);
             var camForward = new Vector3(0f, lookY, 0f) - camPos;
@@ -301,6 +301,23 @@ namespace PlayerMotion.EditorTools
                 $"贴墙时脚尖与脚跟都该贴地（脚尖 {coverToe:F3} / 脚跟 {coverHeel:F3}，站立脚尖 {standToe:F3}）");
             Check(Mathf.Abs(coverToe - coverHeel) < 0.03f,
                 $"贴墙时脚掌应水平（脚尖与脚跟差 {Mathf.Abs(coverToe - coverHeel):F3}m）");
+
+            // 手不能穿出墙面，而且要真的按在墙上（不能缩在身体里）。
+            // 注意 rt2 落在左墙（x 为负），只测 max 会恒真 —— 必须单独构造贴右墙的 case。
+            var handL = solver.Positions[(int)Joint.HandL];
+            var handR = solver.Positions[(int)Joint.HandR];
+            float minHandX = Mathf.Min(handL.x, handR.x);
+            Check(minHandX >= -probe.HalfWidth - 0.02f,
+                $"贴左墙时手不应穿出墙面（最内手 x={minHandX:F2}，墙面 {-probe.HalfWidth:F2}）");
+
+            var rtR = MotionRuntime.Create(new Vector3(startX, 0f, 0f));
+            Drive(rtR, probe, cfg, 0.8f);
+            solver.Solve(rtR.Pose, rtR.RootPos - new Vector3(0f, rtR.RootDrop, 0f), rtR.RootEuler);
+            float maxHandX = Mathf.Max(solver.Positions[(int)Joint.HandL].x, solver.Positions[(int)Joint.HandR].x);
+            Check(maxHandX <= probe.HalfWidth + 0.02f,
+                $"贴右墙时手不应穿出墙面（最远手 x={maxHandX:F2}，墙面 {probe.HalfWidth:F2}）");
+            Check(maxHandX > probe.HalfWidth - 0.35f,
+                $"贴右墙时手应按在墙面上（手 x={maxHandX:F2}，墙面 {probe.HalfWidth:F2}）");
         }
 
         /// <summary>用真实探针驱动若干秒（每帧查询掩体 + 边界钳制）。</summary>

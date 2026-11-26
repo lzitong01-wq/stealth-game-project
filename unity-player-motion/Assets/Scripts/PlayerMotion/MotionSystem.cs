@@ -102,12 +102,13 @@ namespace PlayerMotion
             p[(int)Joint.AnkleR] = new Vector3(-kneeR * 0.3f - crouch * 28f, 0f, 0f);
 
             // 手臂反向摆动：左腿前摆时右臂前摆（对侧摆臂）
-            // 蹲伏时手臂前伸扶膝：上臂抬离身体、肘弯加大、整体向前
+            // 蹲伏时要「前伸扶膝」：上臂几乎垂下（不能只降到 52°，那看着像张开双臂），
+            // 再大幅前摆、肘弯加大，手才会落到膝盖附近。
             float armSwingL = -swingL * 0.85f;
             float armSwingR = -swingR * 0.85f;
-            float armDown = 74f - crouch * 22f;
-            float armBend = 14f + crouch * 62f;
-            float armCrouchSwing = -crouch * 32f;
+            float armDown = 74f - crouch * 4f;
+            float armBend = 14f + crouch * 56f;
+            float armCrouchSwing = -crouch * 55f;
             PoseArm(p, -1, armDown, armSwingL + armCrouchSwing, armBend, 7f);
             PoseArm(p, 1, armDown, armSwingR + armCrouchSwing, armBend, 7f);
 
@@ -133,15 +134,25 @@ namespace PlayerMotion
         {
             float breathe = Mathf.Sin(t * 1.4f) * 0.8f;
 
-            // 身体侧倾（绕 Z），并稍微压低重心
-            p[(int)Joint.Pelvis] = new Vector3(CoverPelvisPitch, 0f, side * -8f);
-            p[(int)Joint.Spine] = new Vector3(4f, 0f, side * -6f);
-            p[(int)Joint.Chest] = new Vector3(2f + breathe, 0f, side * -5f);
-            p[(int)Joint.Neck] = new Vector3(-4f, 0f, side * 3f);
-            p[(int)Joint.Head] = new Vector3(-2f, 0f, side * 4f);
+            // 身体姿态。注意这里不要加大幅侧倾（绕 Z）：
+            // 侧身感来自「朝向已经转到沿墙」（facing），不是靠身体歪。
+            // 之前 pelvis -8° / spine -6° 会把肩膀从 x=0.87 推到 1.0，
+            // 手臂再怎么收都会顶出墙面。保留 2° 的轻微倾向即可。
+            p[(int)Joint.Pelvis] = new Vector3(CoverPelvisPitch, 0f, side * -2f);
+            p[(int)Joint.Spine] = new Vector3(4f, 0f, side * -2f);
+            p[(int)Joint.Chest] = new Vector3(2f + breathe, 0f, side * -2f);
+            p[(int)Joint.Neck] = new Vector3(-4f, 0f, side * 1f);
+            p[(int)Joint.Head] = new Vector3(-2f, 0f, side * 2f);
 
-            // 内侧（靠墙那侧）手臂上举扶墙：down 取负值 = 抬到平举以上
-            PoseArm(p, (sbyte)(side * -1), -42f, -6f, 22f, 24f);
+            // 内侧（靠墙那侧）手臂扶墙。
+            //
+            // 手的世界 x = 肩 x + 上臂水平分量 + 前臂水平分量，两个都必须压住：
+            //   1) 上臂：水平外伸 = 0.28 * cos(down)。肩在 x≈0.87、墙面 1.0，
+            //      所以 down 要到 -75° 才算「竖直向上」（-65° 实测还差 6cm）。
+            //   2) 前臂：bend 是绕 Y 把 ±X 转向 ±Z（沿墙方向）。只折 38° 时仍有一大半
+            //      指向 +X，实测手会顶到 x=1.37、穿墙 0.37m。必须折到 90° 才真正沿墙。
+            // 两者一起，手落在墙面上（x≈0.99）、高度≈墙顶。
+            PoseArm(p, (sbyte)(side * -1), -75f, -6f, 90f, 0f);
 
             // 外侧手臂收得更贴身：垂得更多、前伸更少、肘弯更大，避免看成「平举」
             PoseArm(p, side, 70f, -16f, 98f, 30f);

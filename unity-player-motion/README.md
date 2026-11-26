@@ -63,7 +63,7 @@ unity-player-motion/
 │   │   └── PlayerMotionController.cs  MonoBehaviour 驱动 + 相机跟随
 │   ├── Editor/
 │   │   ├── WhiteboxSceneBuilder.cs  一键生成演示场景
-│   │   └── MotionValidation.cs      41 项断言校验（可在 batchmode 跑）
+│   │   └── MotionValidation.cs      44 项断言校验（可在 batchmode 跑）
 │   └── Scenes/PlayerMotion.unity    生成的演示场景
 ├── Packages/                        包清单
 ├── ProjectSettings/                 项目设置
@@ -80,7 +80,7 @@ unity-player-motion/
 
 ### 方式 A：编辑器菜单
 
-**Tools → Player Motion → 运行动作校验**，Console 会打出 41 条 PASS/FAIL。
+**Tools → Player Motion → 运行动作校验**，Console 会打出 44 条 PASS/FAIL。
 
 ### 方式 B：命令行（CI 可用）
 
@@ -93,7 +93,7 @@ Unity.exe -batchmode -quit \
 
 失败时返回非零退出码。
 
-### 当前校验结果（41/41 通过）
+### 当前校验结果（44/44 通过）
 
 ```
 站高 1.700m | 脚底 y=0.005
@@ -105,6 +105,7 @@ Unity.exe -batchmode -quit \
 翻滚：落点 -0.70（精确）| 贴住对面 | 朝向全程跟随 Facing（偏差 0.0°）
 输入：相机朝 -Z 时 W → (0.00, -1.00)、D → (-1.00, 0.00)
       实际摆法 W → (0.57, -0.82)，与相机水平前向一致
+贴墙：手 x=±1.01（墙面 ±1.00，手掌贴面不穿墙）| 身体外缘 1.00 ≤ 墙面 1.00
 ```
 
 ---
@@ -120,7 +121,7 @@ Unity.exe -batchmode -quit \
 | 关节数 | 23 | 23（同一套枚举与偏移） |
 | 旋转顺序 | Ry·Rx·Rz | Unity `Quaternion.Euler` 同为 Z→X→Y，数值可直接对应 |
 | 白模 | MeshFilter + MeshRenderer | Cube + Sphere（每帧写 TRS） |
-| 测试 | vitest 30 条 | Editor 校验 41 条 |
+| 测试 | vitest 30 条 | Editor 校验 44 条 |
 
 迁移时保留了原版的所有几何约定和踩过的坑，**没有重新设计动作**，所以两边的数值可以逐项对照。
 
@@ -175,7 +176,18 @@ Unity.exe -batchmode -quit \
    新增 `ToWorldMove()`：屏幕右方 = `up × forward`，把按键投影到相机的水平前向/右向；
    没有相机信息时退化为世界方向。现在 W 永远朝屏幕上方。
 
-前六条都加了断言，下次改坏了会直接 FAIL。
+8. **翻滚时角色整个消失**：`RootEuler` 是绕 **脚底** 转的，转到 180° 时骨盆跑到
+   `rootPos.y - 0.95`，整个人沉到地面以下，画面上直接没人。
+   改为绕**重心**（抬高 0.9m）翻转 —— 纯 Y 轴朝向旋转绕同一条竖线上的任意点结果相同，
+   所以非翻滚状态完全不受影响。
+9. **贴墙时手穿出墙面**：算下来 `手 x = 肩 + 上臂水平分量 + 前臂水平分量`，三处都溢：
+   上臂抬 42° 时水平伸出 0.21m；前臂只折 38°，还留一大半指向外侧；
+   身体侧倾 8° 又把肩从 0.87 推到 1.0。三处叠加后手顶到 x=1.37（穿墙 0.37m）。
+   修法是三处一起收：上臂抬到 -75°（几乎竖直）、前臂折到 90°（真正沿墙）、
+   身体侧倾降到 2°（侧身感本来就该由「朝向沿墙」提供，不是靠歪身子）。
+   现在手 x=1.01、墙面 1.00，手掌正好按在墙上。
+
+前八条都加了断言，下次改坏了会直接 FAIL。
 
 ---
 

@@ -64,6 +64,14 @@ namespace PlayerMotion
         public readonly Matrix4x4[] Rotations = new Matrix4x4[Skeleton.JointCount];
 
         /// <summary>
+        /// 整体翻转的枢轴高度（米，相对 RootPos）。
+        /// 翻滚如果绕脚底转，转到 180° 时整个身体会沉到地面以下（骨盆跑到 rootPos.y - 0.95），
+        /// 画面上就是人凭空消失。绕重心转才是真实的前滚翻。
+        /// 纯 Y 轴的朝向旋转绕任意 (0, h, 0) 结果相同，所以非翻滚状态不受影响。
+        /// </summary>
+        private const float FlipPivotHeight = 0.9f;
+
+        /// <summary>
         /// 正向运动学求解。
         /// </summary>
         /// <param name="pose">每个关节的局部欧拉角（度）</param>
@@ -80,8 +88,10 @@ namespace PlayerMotion
 
                 if (!parent.HasValue)
                 {
-                    // 根：偏移在根空间里，随后叠加整体旋转
-                    Positions[i] = rootPos + rootRot.MultiplyVector(Skeleton.BoneOffset[i]);
+                    // 根：绕重心枢轴翻转，而不是绕脚底
+                    var pivot = rootPos + new Vector3(0f, FlipPivotHeight, 0f);
+                    var rest = rootPos + Skeleton.BoneOffset[i];
+                    Positions[i] = pivot + rootRot.MultiplyVector(rest - pivot);
                     Rotations[i] = rootRot * local;
                 }
                 else

@@ -22,10 +22,12 @@ namespace PlayerMotion.EditorTools
             var scene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
 
             // 2. 地面
+            // 要够大：45° 俯角 + fov 38° 下，相机能望到 z≈-13 的地方，
+            // 地面只铺到 -7 的话画面左上角会露出背景色（一块黑）。
             var ground = GameObject.CreatePrimitive(PrimitiveType.Cube);
             ground.name = "Ground";
-            ground.transform.position = new Vector3(0f, -0.1f, 1f);
-            ground.transform.localScale = new Vector3(12f, 0.2f, 16f);
+            ground.transform.position = new Vector3(0f, -0.1f, 0f);
+            ground.transform.localScale = new Vector3(18f, 0.2f, 26f);
             Tint(ground, new Color(0.16f, 0.2f, 0.22f));
 
             // 3. 两面走廊墙（与 CorridorProbe.HalfWidth = 1.0 对齐）
@@ -56,10 +58,10 @@ namespace PlayerMotion.EditorTools
             // PlayerMotionController.LateUpdate 只在运行时跟随，如果这里不设，
             // 打开场景时相机停在原点（正好在角色身体内部），只能看到墙的背面。
             // 参数要和 PlayerMotionController 的默认值保持一致：
-            // 距离 2.6 / 高度 5.0 / 视线高 0.9 → 俯角约 58°，能越过 1.65m 的侧墙看到全身。
+            // 距离 3.8 / 高度 4.7 / 视线高 0.9 → 俯角 45°，既不挡人、动作也读得清。
             float yawRad = -35f * Mathf.Deg2Rad;
             camGo.transform.position = new Vector3(
-                Mathf.Sin(yawRad) * 2.6f, 5.0f, Mathf.Cos(yawRad) * 2.6f);
+                Mathf.Sin(yawRad) * 3.8f, 4.7f, Mathf.Cos(yawRad) * 3.8f);
             camGo.transform.LookAt(new Vector3(0f, 0.9f, 0f));
 
             // 6. 角色
