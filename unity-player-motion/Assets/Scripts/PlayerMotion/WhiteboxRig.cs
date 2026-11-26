@@ -69,7 +69,13 @@ namespace PlayerMotion
         {
             if (_materials == null) return;
             foreach (var m in _materials)
-                if (m != null) Destroy(m);
+            {
+                if (m == null) continue;
+                // 退出 Play 模式时 Application.isPlaying 已为 false，
+                // 此时用 Destroy 会报「Destroy may not be called from edit mode」
+                if (Application.isPlaying) Destroy(m);
+                else DestroyImmediate(m);
+            }
         }
 
         /// <summary>生成白模对象。重复调用无副作用。</summary>
@@ -111,8 +117,8 @@ namespace PlayerMotion
         {
             if (!_built) Build();
 
-            // 蹲下时整体压低（与动作层同一套约定）
-            var root = new Vector3(rt.RootPos.x, rt.RootPos.y - cfg.crouchDrop * rt.CrouchAmount, rt.RootPos.z);
+            // 整体压低：蹲下和贴墙都由动作层算好 RootDrop，视图层不再各自推导
+            var root = new Vector3(rt.RootPos.x, rt.RootPos.y - rt.RootDrop, rt.RootPos.z);
             _solver.Solve(rt.Pose, root, rt.RootEuler);
 
             for (int i = 0; i < Parts.Length; i++)

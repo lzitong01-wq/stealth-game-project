@@ -134,7 +134,7 @@ namespace PlayerMotion
             float breathe = Mathf.Sin(t * 1.4f) * 0.8f;
 
             // 身体侧倾（绕 Z），并稍微压低重心
-            p[(int)Joint.Pelvis] = new Vector3(-6f, 0f, side * -8f);
+            p[(int)Joint.Pelvis] = new Vector3(CoverPelvisPitch, 0f, side * -8f);
             p[(int)Joint.Spine] = new Vector3(4f, 0f, side * -6f);
             p[(int)Joint.Chest] = new Vector3(2f + breathe, 0f, side * -5f);
             p[(int)Joint.Neck] = new Vector3(-4f, 0f, side * 3f);
@@ -146,14 +146,23 @@ namespace PlayerMotion
             // 外侧手臂收得更贴身：垂得更多、前伸更少、肘弯更大，避免看成「平举」
             PoseArm(p, side, 70f, -16f, 98f, 30f);
 
-            // 双腿微屈，内侧腿承担重心
-            p[(int)Joint.HipL] = new Vector3(10f, 0f, 0f);
-            p[(int)Joint.HipR] = new Vector3(14f, 0f, 0f);
-            p[(int)Joint.KneeL] = new Vector3(18f, 0f, 0f);
-            p[(int)Joint.KneeR] = new Vector3(24f, 0f, 0f);
-            p[(int)Joint.AnkleL] = new Vector3(-8f, 0f, 0f);
-            p[(int)Joint.AnkleR] = new Vector3(-10f, 0f, 0f);
+            // 双腿微屈。左右角度必须一致：骨盆高度是固定的，两腿弯曲不同会让一侧脚踝
+            // 比另一侧高 4cm，怎么调都有一条腿悬空。
+            // ankle 取「骨盆 -6 + 髋 10 + 膝 18」的相反数，让脚掌净旋转归零、真正贴平。
+            var ankleFix = -(CoverPelvisPitch + CoverHip + CoverKnee);
+            p[(int)Joint.HipL] = new Vector3(CoverHip, 0f, 0f);
+            p[(int)Joint.HipR] = new Vector3(CoverHip, 0f, 0f);
+            p[(int)Joint.KneeL] = new Vector3(CoverKnee, 0f, 0f);
+            p[(int)Joint.KneeR] = new Vector3(CoverKnee, 0f, 0f);
+            p[(int)Joint.AnkleL] = new Vector3(ankleFix, 0f, 0f);
+            p[(int)Joint.AnkleR] = new Vector3(ankleFix, 0f, 0f);
         }
+
+        // 贴墙姿态的腿部角度。改这里必须同步改 MotionConfig.coverLegDrop，
+        // 否则脚会悬空或穿地（和蹲下的 crouchDrop 是同一个道理）。
+        private const float CoverPelvisPitch = -6f;
+        private const float CoverHip = 10f;
+        private const float CoverKnee = 18f;
 
         /// <summary>翻滚：团身抱膝。整体旋转由 RootEuler 负责，这里只管四肢。</summary>
         private static void PoseRoll(Vector3[] p, float t)
@@ -405,10 +414,12 @@ namespace PlayerMotion
                     break;
                 default:
                     PoseIdle(target, rt.StateTime);
-                    // 待机也可能处于半蹲（刚松手），叠加蹲姿
+                    // 待机也可能处于半蹲（刚松手），叠加蹲姿。
+                    // 用运行时自带的暂存缓冲，避免每帧 new 一个数组（待机半蹲时每帧都在分配）。
                     if (rt.CrouchAmount > 0.001f)
                     {
-                        var c = new Vector3[Skeleton.JointCount];
+                        var c = rt.ScratchPose;
+                        for (int i = 0; i < c.Length; i++) c[i] = Vector3.zero;
                         PoseGait(c, rt.GaitPhase, 0f, 0f, 0f, rt.CrouchAmount);
                         PoseUtil.LerpTo(target, c, rt.CrouchAmount, target);
                     }
@@ -426,8 +437,10 @@ namespace PlayerMotion
             if (rt.State == MotionState.Roll)
             {
                 float t = Mathf.Clamp01(rt.RollT);
-                // 侧翻 360°，与位移同步，收尾正好回正
-                rt.RootEuler = new Vector3(0f, 0f, -360f * PoseUtil.EaseInOut(t) * rt.RollDir);
+                // 侧翻 360°，与位移同步，收尾正好回正。
+                // Y 必须带上 Facing：欧拉顺序是 Ry*Rx*Rz，先绕局部 Z 翻转再整体转朝向。
+                // 只写 Z 的话，贴墙时若朝向是 180°（沿 -Z 那面墙），翻滚瞬间会猛地转回世界 +Z。
+                rt.RootEuler = new Vector3(0f, rt.Facing, -360f * PoseUtil.EaseInOut(t) * rt.RollDir);
             }
             else if (rt.State == MotionState.Cover)
             {
@@ -438,9 +451,19 @@ namespace PlayerMotion
             {
                 rt.RootEuler = new Vector3(0f, rt.Facing, 0f);
             }
+
+            // ---- 13. 根下沉量 ----
+            // 骨盆高度是固定的（BoneOffset.Pelvis = 0.95），所以腿一弯，脚就必然离地。
+            //   蹲下：腿弯得多 → crouchDrop
+            //   贴墙：腿微屈 → coverLegDrop（很小，但不补的话脚会悬空 3cm，看着像踮脚）
+            // 视图层直接读这个值整体压低，两个状态用同一套约定。
+            float drop = cfg.crouchDrop * rt.CrouchAmount;
+            if (rt.State == MotionState.Cover)
+                drop += cfg.coverLegDrop * rt.CoverAmount;
+            rt.RootDrop = drop;
         }
 
-        /// <summary>蹲下时根节点（脚底）应该画在哪。视图层用它压低整体。</summary>
+        /// <summary>根节点（脚底）相对 RootPos 的下沉量，视图层用它压低整体。</summary>
         public static float RootHeightOffset(MotionRuntime rt, MotionConfig cfg)
             => -cfg.crouchDrop * rt.CrouchAmount;
     }

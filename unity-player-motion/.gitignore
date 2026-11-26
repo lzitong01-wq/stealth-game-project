@@ -42,3 +42,10 @@ crashlytics-build.properties
 *.aab
 *.unitypackage
 *.app
+
+# MCP 截图工具的输出
+Assets/Screenshots/
+Assets/Screenshots.meta
+
+# 本地临时备份
+*.bak

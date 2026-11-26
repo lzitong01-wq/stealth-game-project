@@ -29,13 +29,16 @@ namespace PlayerMotion
         public bool CameraFollow = true;
         public Camera TargetCamera;
         [Tooltip("环绕距离")]
-        public float CameraDistance = 4.2f;
-        [Tooltip("相机高度")]
-        public float CameraHeight = 2.4f;
-        [Tooltip("水平角（度）。-41° 接近原版的 -0.72 弧度")]
-        public float CameraYawDeg = -41.3f;
+        public float CameraDistance = 2.6f;
+        [Tooltip(
+            "相机高度。必须够高才能越过 1.65m 的侧墙看到角色全身：\n" +
+            "俯角 = atan((高度 - 视线高度) / 距离) = atan(4.1/2.6) ≈ 58°。\n" +
+            "俯角小于 45° 时近侧墙会把角色下半身完全挡死。")]
+        public float CameraHeight = 5.0f;
+        [Tooltip("水平角（度）。角度越大越偏侧，但太大会把相机甩到墙外被墙挡住")]
+        public float CameraYawDeg = -35f;
         [Tooltip("视线对准的高度")]
-        public float CameraLookHeight = 0.95f;
+        public float CameraLookHeight = 0.9f;
 
         /// <summary>动作运行时。HUD / 调试可读。</summary>
         public MotionRuntime Runtime { get; private set; }

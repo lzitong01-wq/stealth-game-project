@@ -52,6 +52,16 @@ namespace PlayerMotion.EditorTools
             cam.clearFlags = CameraClearFlags.SolidColor;
             camGo.AddComponent<AudioListener>();
 
+            // 相机必须在这里就摆到等距位置。
+            // PlayerMotionController.LateUpdate 只在运行时跟随，如果这里不设，
+            // 打开场景时相机停在原点（正好在角色身体内部），只能看到墙的背面。
+            // 参数要和 PlayerMotionController 的默认值保持一致：
+            // 距离 2.6 / 高度 5.0 / 视线高 0.9 → 俯角约 58°，能越过 1.65m 的侧墙看到全身。
+            float yawRad = -35f * Mathf.Deg2Rad;
+            camGo.transform.position = new Vector3(
+                Mathf.Sin(yawRad) * 2.6f, 5.0f, Mathf.Cos(yawRad) * 2.6f);
+            camGo.transform.LookAt(new Vector3(0f, 0.9f, 0f));
+
             // 6. 角色
             var player = new GameObject("Player");
             var rig = player.AddComponent<WhiteboxRig>();
@@ -70,7 +80,7 @@ namespace PlayerMotion.EditorTools
                       "按 Play 运行。操作：WASD 移动 / Shift 疾走 / Ctrl 下蹲 / 靠近墙自动贴墙 / Space 翻滚换位。");
         }
 
-        private static void BuildWall(string name, float x)
+        private static void BuildWall(string name, float innerX)
         {
             const float height = 1.65f;
             const float thick = 0.26f;
@@ -81,7 +91,13 @@ namespace PlayerMotion.EditorTools
 
             var wall = GameObject.CreatePrimitive(PrimitiveType.Cube);
             wall.name = name;
-            wall.transform.position = new Vector3(x, height * 0.5f, zCenter);
+
+            // innerX 是墙「朝走廊那一面」的坐标，不是中心。
+            // 角色被 CorridorProbe 限制在 |x| ≤ HalfWidth - BodyRadius = 0.7，
+            // 身体外缘正好 0.7 + 0.3 = 1.0 = HalfWidth，所以墙面必须落在 ±HalfWidth 上才会相切。
+            // 若按中心定位（中心 = HalfWidth），墙内表面会跑到 0.87，人会嵌进去 13cm。
+            float sign = Mathf.Sign(innerX);
+            wall.transform.position = new Vector3(innerX + sign * thick * 0.5f, height * 0.5f, zCenter);
             wall.transform.localScale = new Vector3(thick, height, zLen);
             Tint(wall, new Color(0.45f, 0.18f, 0.2f));
         }

@@ -58,10 +58,15 @@ namespace PlayerMotion
         public Vector3[] TargetPose = PoseUtil.RestPose();
         /// <summary>最终输出姿态（已混合）。</summary>
         public Vector3[] Pose = PoseUtil.RestPose();
+        /// <summary>
+        /// 暂存缓冲：生成「待机 + 半蹲」这类叠加姿态时用，
+        /// 避免每帧 new 数组（哪怕只有几十字节，待机时每帧分配也会累积成 GC 峰值）。
+        /// </summary>
+        public Vector3[] ScratchPose = PoseUtil.RestPose();
 
-        /// <summary>过渡进度 0..1。</summary>
+        /// <summary>过渡进度 0..1。初始为 1（已经稳定在初始姿态，不需要过渡）。</summary>
         public float Blend = 1f;
-        public float BlendDuration;
+        public float BlendDuration = 0.0001f;
 
         /// <summary>步态相位（弧度），保证停走切换时不跳变。</summary>
         public float GaitPhase;
@@ -71,6 +76,12 @@ namespace PlayerMotion
         public float Facing;
         /// <summary>根位置（脚底世界坐标）。</summary>
         public Vector3 RootPos;
+        /// <summary>
+        /// 每帧算出的根下沉量（米）。骨盆高度固定，腿一弯脚就会离地，
+        /// 视图层要用 RootPos - (0, RootDrop, 0) 当作真正的根位置。
+        /// 蹲下和贴墙共用这一个通道。
+        /// </summary>
+        public float RootDrop;
         /// <summary>根整体旋转（度）。翻滚时绕 Z 轴转。</summary>
         public Vector3 RootEuler;
 

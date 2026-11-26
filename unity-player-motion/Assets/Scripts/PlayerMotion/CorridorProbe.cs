@@ -25,9 +25,12 @@ namespace PlayerMotion
     /// 演示用掩体：两条沿 Z 轴延伸的平行墙，位于 x = ±HalfWidth。
     ///
     /// 尺寸是算过的：
-    ///   贴墙位置 = HalfWidth - BodyRadius = 1.0 - 0.25 = 0.75m
-    ///   距墙 = 0.25m，落在「可贴墙」阈值 0.45m 内
-    ///   翻滚位移 1.5m = 2 × 0.75，正好从一侧贴墙滚到另一侧贴墙
+    ///   贴墙位置 = HalfWidth - BodyRadius = 1.0 - 0.3 = 0.7m
+    ///   距墙 = 0.3m，落在「可贴墙」阈值 0.45m 内
+    ///   翻滚位移 1.4m = 2 × 0.7，正好从一侧贴墙滚到另一侧贴墙
+    ///
+    /// 注意：墙的「内表面」应落在 x = ±HalfWidth 上（见 WhiteboxSceneBuilder），
+    /// 这样角色身体外缘（0.7 + 0.3）才刚好与墙面相切，不会嵌进墙里。
     /// </summary>
     [System.Serializable]
     public sealed class CorridorProbe

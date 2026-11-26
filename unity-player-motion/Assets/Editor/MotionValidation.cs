@@ -91,8 +91,8 @@ namespace PlayerMotion.EditorTools
             solver.Solve(PoseUtil.RestPose(), Vector3.zero, Vector3.zero);
             float standAnkleY = solver.Positions[(int)Joint.AnkleL].y;
 
-            // 蹲下（与视图层一样把 root 整体压低）
-            var root = new Vector3(0f, -cfg.crouchDrop * rt.CrouchAmount, 0f);
+            // 蹲下（与视图层一样，用动作层算好的 RootDrop 整体压低）
+            var root = new Vector3(0f, -rt.RootDrop, 0f);
             solver.Solve(rt.Pose, root, rt.RootEuler);
 
             var hip = solver.Positions[(int)Joint.HipL];
@@ -138,7 +138,7 @@ namespace PlayerMotion.EditorTools
             var input = MotionInput.None;
             input.Crouch = true;
             for (int i = 0; i < 90; i++) MotionSystem.Step(rtCrouch, input, 1f / 60f, cfg);
-            var root = new Vector3(0f, -cfg.crouchDrop * rtCrouch.CrouchAmount, 0f);
+            var root = new Vector3(0f, -rtCrouch.RootDrop, 0f);
             solver.Solve(rtCrouch.Pose, root, rtCrouch.RootEuler);
 
             var sh2 = solver.Positions[(int)Joint.ShoulderL];
@@ -192,6 +192,67 @@ namespace PlayerMotion.EditorTools
             Check(rt2.RootPos.x < 0f, $"翻滚应跨到走廊另一侧，实际 x={rt2.RootPos.x:F2}");
             Check(Mathf.Abs(rt2.RootPos.x) > 0.5f, $"翻滚落点应贴近对面墙，实际 |x|={Mathf.Abs(rt2.RootPos.x):F2}");
             Check(rt2.State == MotionState.Cover, $"落地应贴住对面墙，实际 {rt2.State}");
+
+            // 落点精度：rollDistance 应正好等于两侧贴墙位置之差，不能让 Clamp 去兜底
+            float expectX = -(probe.HalfWidth - probe.BodyRadius);
+            Check(Mathf.Abs(rt2.RootPos.x - expectX) < 0.12f,
+                $"翻滚落点应约 {expectX:F2}，实际 {rt2.RootPos.x:F2}（rollDistance 与走廊宽度需配套）");
+
+            // 回归：翻滚时整体朝向不能被重置。
+            // RootEuler 曾只写 Z 轴，贴墙朝向 180°（沿 -Z 那面墙）时，人会在翻滚瞬间猛地转回世界 +Z。
+            var rt4 = MotionRuntime.Create(new Vector3(-startX, 0f, 0f));
+            rt4.Facing = 180f;
+            Drive(rt4, probe, cfg, 0.5f);
+            Check(rt4.State == MotionState.Cover, $"背向贴墙应进入 Cover，实际 {rt4.State}");
+
+            var c4 = probe.Query(rt4.RootPos, rt4.Facing);
+            MotionSystem.Step(rt4, new MotionInput
+            {
+                RollPressed = true,
+                CoverAvailable = c4.Available,
+                CoverSide = c4.Side,
+                CoverDistance = c4.Distance,
+                CoverNormal = c4.Normal,
+            }, 1f / 60f, cfg);
+            Check(rt4.State == MotionState.Roll, $"应进入 Roll，实际 {rt4.State}");
+
+            float maxYawDrift = 0f;
+            for (int i = 0; i < 34; i++)
+            {
+                var cc = probe.Query(rt4.RootPos, rt4.Facing);
+                MotionSystem.Step(rt4, new MotionInput
+                {
+                    CoverAvailable = cc.Available,
+                    CoverSide = cc.Side,
+                    CoverDistance = cc.Distance,
+                    CoverNormal = cc.Normal,
+                }, 1f / 60f, cfg);
+                maxYawDrift = Mathf.Max(maxYawDrift, Mathf.Abs(Mathf.DeltaAngle(rt4.RootEuler.y, rt4.Facing)));
+            }
+            Check(maxYawDrift < 0.5f,
+                $"翻滚时整体朝向应跟随 Facing（facing=180° 下最大偏差 {maxYawDrift:F1}°，>0 说明朝向被重置）");
+
+            // 贴墙站姿的落地质量：
+            //   1) 身体外缘不能越过墙内表面（否则半个人嵌进墙里）
+            //   2) 脚掌要真正踩在地上（腿微屈会让脚离地，靠 RootDrop 补回来）
+            var solver = new PoseSolver();
+            solver.Solve(PoseUtil.RestPose(), Vector3.zero, Vector3.zero);
+            float standAnkle = solver.Positions[(int)Joint.AnkleL].y;
+            float standToe = solver.Positions[(int)Joint.ToeL].y;
+            var coverRoot = rt2.RootPos - new Vector3(0f, rt2.RootDrop, 0f);
+            solver.Solve(rt2.Pose, coverRoot, rt2.RootEuler);
+            float coverAnkle = solver.Positions[(int)Joint.AnkleL].y;
+            float coverToe = solver.Positions[(int)Joint.ToeL].y;
+            float coverHeel = solver.Positions[(int)Joint.HeelL].y;
+
+            Check(Mathf.Abs(rt2.RootPos.x) + probe.BodyRadius <= probe.HalfWidth + 0.01f,
+                $"贴墙时身体不应嵌进墙（外缘 {Mathf.Abs(rt2.RootPos.x) + probe.BodyRadius:F2} ≤ 墙面 {probe.HalfWidth:F2}）");
+            Check(Mathf.Abs(coverAnkle - standAnkle) < 0.02f,
+                $"贴墙时脚应落地（踝高 {coverAnkle:F3}，站立 {standAnkle:F3}，差 {Mathf.Abs(coverAnkle - standAnkle):F3}m）");
+            Check(coverToe > -0.03f && coverHeel > -0.03f && coverToe < 0.05f && coverHeel < 0.05f,
+                $"贴墙时脚尖与脚跟都该贴地（脚尖 {coverToe:F3} / 脚跟 {coverHeel:F3}，站立脚尖 {standToe:F3}）");
+            Check(Mathf.Abs(coverToe - coverHeel) < 0.03f,
+                $"贴墙时脚掌应水平（脚尖与脚跟差 {Mathf.Abs(coverToe - coverHeel):F3}m）");
         }
 
         /// <summary>用真实探针驱动若干秒（每帧查询掩体 + 边界钳制）。</summary>

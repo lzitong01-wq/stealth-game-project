@@ -28,8 +28,11 @@ namespace PlayerMotion
 
         [Header("翻滚")]
         public float rollDuration = 0.58f;
-        [Tooltip("横向位移（米）。取 1.5 = 2×(走廊半宽 1.0 - 身体半径 0.25)，保证能从一侧贴墙滚到另一侧。")]
-        public float rollDistance = 1.5f;
+        [Tooltip(
+            "翻滚横向位移（米）。\n" +
+            "必须 = 2 ×（走廊半宽 - 身体半径）= 2 ×（1.0 - 0.3）= 1.4，\n" +
+            "这样从一侧贴墙出发，正好落在另一侧贴墙位置。改走廊宽度或身体半径就要同步改这里。")]
+        public float rollDistance = 1.4f;
         [Tooltip("翻滚落地后，距墙多近算「落到对面掩体」")]
         public float rollCoverSnap = 0.6f;
 
@@ -47,6 +50,13 @@ namespace PlayerMotion
             "与腿部角度（髋 -60 / 膝 +100）配套：这组角度让髋到踝的垂直距离缩短约 0.35m，\n" +
             "root 同步下降同样的量，脚踝才能留在原高度、脚掌贴地。改角度就要重算这个值。")]
         public float crouchDrop = 0.35f;
+
+        [Tooltip(
+            "贴墙姿态的根下沉量（米）。\n" +
+            "贴墙时双腿微屈（骨盆 -6 / 髋 10 / 膝 18），髋到踝的垂直距离缩短 0.052m（实测），\n" +
+            "根要同步下降同样的量，脚掌才会踩在地上；不补的话脚会悬空，看着像踮脚。\n" +
+            "改 MotionSystem.PoseCover 的腿部角度就要重跑校验、按实测值重设这个数。")]
+        public float coverLegDrop = 0.052f;
 
         /// <summary>做一个浅拷贝，避免运行时改到原始资产。</summary>
         public MotionConfig Clone() => (MotionConfig)MemberwiseClone();
