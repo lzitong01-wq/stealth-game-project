@@ -1,0 +1,51 @@
+# Unity 生成的目录 —— 绝对不能进仓库
+
+[Ll]ibrary/
+[Tt]emp/
+[Oo]bj/
+[Bb]uild/
+[Bb]uilds/
+[Ll]ogs/
+[Uu]ser[Ss]ettings/
+[Mm]emoryCaptures/
+[Rr]ecordings/
+
+# 自动生成的工程文件
+*.csproj
+*.unityproj
+*.sln
+*.suo
+*.user
+*.userprefs
+*.pidb
+*.booproj
+*.svd
+*.pdb
+*.mdb
+*.opendb
+*.VC.db
+*.pidb.meta
+
+# 系统与编辑器杂项
+.DS_Store
+Thumbs.db
+.vs/
+.idea/
+*.swp
+
+# 崩溃与诊断
+sysinfo.txt
+crashlytics-build.properties
+
+# 打包产物
+*.apk
+*.aab
+*.unitypackage
+*.app
+
+# MCP 截图工具的输出
+Assets/Screenshots/
+Assets/Screenshots.meta
+
+# 本地临时备份
+*.bak
